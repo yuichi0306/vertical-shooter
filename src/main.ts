@@ -4,7 +4,7 @@
 //   - 敵やボスを倒したときに破片が飛び散るエフェクト
 // ===================================================================
 
-import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
+import { STAGES, type EnemyKind, type BossKind, type StageTheme } from "./stage";
 import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion, playBomb, setMusic } from "./audio";
 
 // ゲーム内部の解像度（座標はすべてこのサイズを基準に書く）
@@ -96,10 +96,19 @@ const clouds = makeLayer(7, 24, 42, 0.7, 1.6); // 流れる雲（中くらい）
 const nearGround = makeLayer(5, 60, 95, 1.0, 1.9); // 近い地面（いちばん速い）
 
 // 夜空のグラデーション（上＝濃い闇、下＝少し明るい地平線）。一度だけ作る。
-const skyGradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-skyGradient.addColorStop(0, "#05050f");
-skyGradient.addColorStop(0.7, "#070a18");
-skyGradient.addColorStop(1, "#0d1226");
+const skyGradientNight = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+skyGradientNight.addColorStop(0, "#05050f");
+skyGradientNight.addColorStop(0.7, "#070a18");
+skyGradientNight.addColorStop(1, "#0d1226");
+
+// 地球の空のグラデーション（上＝青い空、下＝水色の海）。一度だけ作る。
+const skyGradientDay = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+skyGradientDay.addColorStop(0, "#4aa3df"); // 上空の青
+skyGradientDay.addColorStop(0.5, "#8fd0f0"); // 水色の空
+skyGradientDay.addColorStop(1, "#bfe9ff"); // 下＝明るい海面
+
+// 今の背景テーマ（ステージごとに切り替わる）。起動時／タイトルは夜空。
+let theme: StageTheme = "night";
 
 // 1つの層を下へ流す。画面の下に出たら上へ戻して再利用する。
 function updateLayer(layer: Deco[], dt: number, margin: number): void {
@@ -154,6 +163,12 @@ type GameState = "title" | "playing" | "gameover" | "clear";
 let gameState: GameState = "title"; // 起動時はタイトル画面から
 let resultLock = 0; // 決着直後、入力を受け付けない時間（秒）
 let titleLock = 0; // タイトルに戻った直後、入力を受け付けない時間（秒）
+
+// 連戦の進行：今が何ステージ目か
+let stageIndex = 0; // 0 = ステージ1
+let stage = STAGES[0]; // 今プレイしているステージのデータ
+const STAGE_BANNER_TIME = 2.2; // ステージ開始時に名前を表示する時間（秒）
+let stageBanner = 0; // 0より大きい間、ステージ名を画面中央に出す
 
 // スコア
 const SCORE_ENEMY = 100; // 雑魚1体撃破
@@ -241,33 +256,30 @@ const enemyBullets: EnemyBullet[] = [];
 // -------------------------------------------------------------------
 // ボス
 // -------------------------------------------------------------------
-const BOSS_MAX_HP = 80; // ボスの体力
-const BOSS_RADIUS = 38; // 見た目／当たり判定
+const BOSS_RADIUS = 38; // 見た目／当たり判定（両ボス共通）
 const BOSS_Y_TARGET = 110; // 入場後に留まる高さ
 const BOSS_ENTER_SPEED = 70; // 入場で下りてくる速さ
-const BOSS_SWAY_SPEED = 60; // 戦闘中に左右へ動く速さ
-const BOSS_FIRE_INTERVAL = 1.4; // 攻撃と攻撃の間隔（秒）
 const EBULLET_SPEED = 190; // 敵弾の速さ
-
-// 怒りモード：HPがこの割合以下になると攻撃が激しくなる
-const BOSS_ENRAGE_RATIO = 0.5; // 半分以下で発動
-const BOSS_SWAY_SPEED_ENRAGED = 105; // 怒り時の左右移動の速さ
-const BOSS_FIRE_INTERVAL_ENRAGED = 0.75; // 怒り時の攻撃間隔（短い＝激しい）
+const BOSS_ENRAGE_RATIO = 0.5; // 怒りモード：HPがこの割合以下になると激しくなる
 
 // phase … "enter"=入場中, "fight"=戦闘中
 type Boss = {
   x: number;
   y: number;
   hp: number;
+  maxHp: number; // 最大HP（HPバーの割合・怒り判定に使う）
+  kind: BossKind; // ボスの種類（見た目と攻撃が変わる）
   phase: "enter" | "fight";
   dir: number; // 左右移動の向き（+1 か -1）
   fireTimer: number; // 次の攻撃までの残り秒
   patternIndex: number; // 次に使う攻撃パターン番号
   walk: number; // 歩行アニメの位相（増えるほど腕足が振れる）
+  spinAngle: number; // うずまき攻撃用の回転角度
+  moveTime: number; // 前後（上下）移動用にたまっていく時間
   enraged: boolean; // 怒りモードに入ったか（HP半分以下で true）
 };
 let boss: Boss | null = null;
-let bossSpawned = false; // このプレイで既にボスを出したか
+let bossSpawned = false; // このステージで既にボスを出したか
 
 // -------------------------------------------------------------------
 // 敵
@@ -281,16 +293,25 @@ const SNAKE_FREQ = 1.8; // 蛇：くねりの速さ
 const SNAKE_FIRE_INTERVAL = 1.8; // 蛇：弾を撃つ間隔（秒）。蛇だけが撃ってくる
 const SPIDER_SPEED = 130; // 蜘蛛：上下動の基準速さ（px/秒）
 const SPIDER_FREQ = 3.0; // 蜘蛛：糸で伸び縮みする速さ
+const EAGLE_HP = 2; // 鷲：少し硬い（2発で倒す）
+const EAGLE_FALL_SPEED = 55; // 鷲：少しずつ下りる基準速さ（px/秒）
+const EAGLE_WANDER_SPEED = 130; // 鷲：ふらふら横移動する速さ（px/秒）
+const EAGLE_WANDER_MIN = 0.5; // 鷲：方向を変えるまでの最短時間（秒）
+const EAGLE_WANDER_MAX = 1.2; // 鷲：方向を変えるまでの最長時間（秒）
+const EAGLE_FIRE_INTERVAL = 2.0; // 鷲：弾を撃つ間隔（秒）
 
 // 種類ごとの爆発の色（撃破エフェクト用）
 const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
   snail: "#e8c98f", // カタツムリ＝クリーム色
   snake: "#6cc456", // 蛇＝緑
   spider: "#d2453f", // 蜘蛛＝赤
+  eagle: "#b5793a", // 鷲＝こげ茶
 };
 
 // kind … 敵の種類、baseX … 揺れの基準になる横位置、age … 出現からの経過秒
-// fireTimer … 次に弾を撃つまでの残り秒（蛇だけが使う）
+// fireTimer … 次に弾を撃つまでの残り秒（蛇と鷲が使う）
+// vx/vy … 1秒あたりの移動量（鷲のふらふら移動に使う）
+// wanderTimer … 次にふらふらの向きを変えるまでの残り秒（鷲だけが使う）
 type Enemy = {
   x: number;
   y: number;
@@ -299,6 +320,9 @@ type Enemy = {
   baseX: number;
   age: number;
   fireTimer: number;
+  vx: number;
+  vy: number;
+  wanderTimer: number;
 };
 const enemies: Enemy[] = [];
 
@@ -309,9 +333,17 @@ let nextEventIndex = 0;
 // 敵を1体作る
 function spawnEnemy(kind: EnemyKind, xRatio: number): void {
   const x = xRatio * WIDTH;
-  // 蛇の発射タイミングを少しずらして、全部が同時に撃たないようにする
-  const fireTimer = SNAKE_FIRE_INTERVAL * (0.6 + Math.random() * 0.8);
-  enemies.push({ x, y: -ENEMY_RADIUS, hp: ENEMY_HP, kind, baseX: x, age: 0, fireTimer });
+  // 発射タイミングを少しずらして、全部が同時に撃たないようにする
+  let fireTimer = SNAKE_FIRE_INTERVAL * (0.6 + Math.random() * 0.8);
+  let hp = ENEMY_HP;
+  let vx = 0;
+  let vy = 0;
+  if (kind === "eagle") {
+    hp = EAGLE_HP;
+    fireTimer = EAGLE_FIRE_INTERVAL * (0.5 + Math.random());
+    vy = EAGLE_FALL_SPEED; // 最初はまっすぐ下りる
+  }
+  enemies.push({ x, y: -ENEMY_RADIUS, hp, kind, baseX: x, age: 0, fireTimer, vx, vy, wanderTimer: 0 });
 }
 
 // 自機のショットを撃つ。強化段階で弾の数と広がりが変わる。
@@ -332,17 +364,22 @@ function fireShot(): void {
   }
 }
 
-// ボスを登場させる
-function spawnBoss(): void {
+// ボスを登場させる（種類はステージごとに決まる）
+function spawnBoss(kind: BossKind): void {
+  const cfg = BOSS_CONFIG[kind];
   boss = {
     x: WIDTH / 2,
     y: -BOSS_RADIUS,
-    hp: BOSS_MAX_HP,
+    hp: cfg.maxHp,
+    maxHp: cfg.maxHp,
+    kind,
     phase: "enter",
     dir: 1,
-    fireTimer: BOSS_FIRE_INTERVAL,
+    fireTimer: cfg.fireInterval,
     patternIndex: 0,
     walk: 0,
+    spinAngle: 0,
+    moveTime: 0,
     enraged: false,
   };
   bossSpawned = true;
@@ -378,8 +415,83 @@ function bossPatternFan(b: Boss): void {
   }
 }
 
-// 攻撃パターンの一覧（ここに足せば技が増える）
-const BOSS_PATTERNS = [bossPatternAimed, bossPatternFan];
+// 攻撃パターン2：自機を狙って広めに5発（機械ゴリラ用）
+function bossPatternAimedWide(b: Boss): void {
+  const base = Math.atan2(player.y - b.y, player.x - b.x);
+  for (const offset of [-0.32, -0.16, 0, 0.16, 0.32]) {
+    fireEnemyBullet(b.x, b.y + BOSS_RADIUS, base + offset);
+  }
+}
+
+// 攻撃パターン3：全方位にリング状にばらまく（機械ゴリラ用）
+function bossPatternRing(b: Boss): void {
+  const count = 16;
+  for (let i = 0; i < count; i++) {
+    fireEnemyBullet(b.x, b.y, (i / count) * Math.PI * 2);
+  }
+}
+
+// 攻撃パターン4：回転しながら撃つ「うずまき弾」（機械ゴリラ用）
+//   呼ばれるたびに少しずつ角度がずれて、らせん状に弾が広がる
+function bossPatternSpiral(b: Boss): void {
+  for (let i = 0; i < 4; i++) {
+    fireEnemyBullet(b.x, b.y, b.spinAngle + (i / 4) * Math.PI * 2);
+  }
+  b.spinAngle += 0.45; // 次回は少し回す
+}
+
+// 攻撃パターン5：左右の腕から下方向へ2列の連射（機械ゴリラ用）
+function bossPatternTwinStream(b: Boss): void {
+  for (const side of [-1, 1]) {
+    const x = b.x + side * 26;
+    for (const offset of [-0.12, 0, 0.12]) {
+      fireEnemyBullet(x, b.y + 10, Math.PI / 2 + offset);
+    }
+  }
+}
+
+// ボスごとの設定（体力・動き・攻撃の激しさ・使う技の一覧）
+type BossConfig = {
+  maxHp: number; // 体力
+  swaySpeed: number; // 左右移動の速さ
+  swaySpeedEnraged: number; // 怒り時の左右移動の速さ
+  bobAmplitude: number; // 前後（上下）に動く幅（px）。0なら前後移動しない
+  bobSpeed: number; // 前後移動の速さ
+  fireInterval: number; // 攻撃と攻撃の間隔（秒）
+  fireIntervalEnraged: number; // 怒り時の攻撃間隔（短い＝激しい）
+  patterns: ((b: Boss) => void)[]; // 順番に使う攻撃技
+};
+
+const BOSS_CONFIG: Record<BossKind, BossConfig> = {
+  // ステージ1：ゴリラ（おとなしめ・左右のみ・2種の技）
+  gorilla: {
+    maxHp: 80,
+    swaySpeed: 60,
+    swaySpeedEnraged: 105,
+    bobAmplitude: 0,
+    bobSpeed: 0,
+    fireInterval: 1.4,
+    fireIntervalEnraged: 0.75,
+    patterns: [bossPatternAimed, bossPatternFan],
+  },
+  // ステージ2：機械ゴリラ（硬い・左右＋前後に動く・多彩な5種の技）
+  machineGorilla: {
+    maxHp: 120,
+    swaySpeed: 85,
+    swaySpeedEnraged: 140,
+    bobAmplitude: 50, // 自機に近づいたり離れたり、前後に動く
+    bobSpeed: 1.3,
+    fireInterval: 1.1,
+    fireIntervalEnraged: 0.6,
+    patterns: [
+      bossPatternAimedWide,
+      bossPatternFan,
+      bossPatternRing,
+      bossPatternTwinStream,
+      bossPatternSpiral,
+    ],
+  },
+};
 
 // 自機がダメージを受けたときの共通処理（敵との接触・敵弾の両方から呼ぶ）
 function damagePlayer(): void {
@@ -424,18 +536,46 @@ function useBomb(): void {
     boss.hp -= BOSS_BOMB_DAMAGE;
     spawnExplosion(boss.x, boss.y, "#ffffff", 20);
     if (boss.hp <= 0) {
-      spawnExplosion(boss.x, boss.y, "#b15cff", 60);
-      playBossExplosion();
-      boss = null;
-      score += SCORE_BOSS;
-      gameState = "clear";
-      resultLock = 0.8;
-      saveHighScoreIfNeeded();
-      setMusic(null);
+      defeatBoss(); // 次ステージへ進むか全クリア
     } else {
       playBossHit();
     }
   }
+}
+
+// ボスを倒したときの共通処理。
+//   まだ後のステージがあれば次へ進み、最後のステージならゲームクリア。
+function defeatBoss(): void {
+  if (!boss) return;
+  const color = boss.kind === "machineGorilla" ? "#7fe9ff" : "#b15cff";
+  spawnExplosion(boss.x, boss.y, color, 70); // 大きな爆発
+  playBossExplosion();
+  boss = null;
+  score += SCORE_BOSS;
+  if (stageIndex < STAGES.length - 1) {
+    advanceStage(); // 次のステージへ（連戦）
+  } else {
+    gameState = "clear"; // 最後のボスを倒した＝全クリア
+    resultLock = 0.8;
+    saveHighScoreIfNeeded();
+    setMusic(null);
+  }
+}
+
+// 次のステージへ進む。残機・パワー・スコアは引き継ぐ。
+function advanceStage(): void {
+  stageIndex += 1;
+  stage = STAGES[stageIndex];
+  theme = stage.theme; // 背景テーマを切り替え
+  stageTime = 0;
+  nextEventIndex = 0;
+  bossSpawned = false;
+  enemies.length = 0;
+  enemyBullets.length = 0;
+  bullets.length = 0;
+  items.length = 0;
+  stageBanner = STAGE_BANNER_TIME; // 「STAGE 2」などを表示
+  setMusic("normal"); // 道中の通常BGMに戻す
 }
 
 // ゲームを最初の状態に戻す（開始時とリスタート時に呼ぶ）
@@ -459,6 +599,10 @@ function resetGame(): void {
   particles.length = 0;
   boss = null;
   bossSpawned = false;
+  stageIndex = 0; // 最初のステージから
+  stage = STAGES[0];
+  theme = stage.theme;
+  stageBanner = STAGE_BANNER_TIME; // 「STAGE 1」を表示
   stageTime = 0;
   nextEventIndex = 0;
   defeated = 0;
@@ -535,6 +679,7 @@ function update(dt: number): void {
     else if (isDown("KeyZ", "Space", "Enter")) {
       gameState = "title";
       titleLock = 0.4; // 押しっぱなしで即スタートしないように
+      theme = "night"; // タイトルは夜空の背景に戻す
     }
     return;
   }
@@ -594,14 +739,17 @@ function update(dt: number): void {
     if (b.y < -10 || b.x < -10 || b.x > WIDTH + 10) bullets.splice(i, 1);
   }
 
+  // ステージ名のバナー表示を時間で消していく
+  if (stageBanner > 0) stageBanner -= dt;
+
   // --- 敵の出現（データ駆動タイムライン）---
   stageTime += dt;
   // 「今の時刻」に達したイベントを順番に処理する
   while (
-    nextEventIndex < STAGE_TIMELINE.length &&
-    STAGE_TIMELINE[nextEventIndex].time <= stageTime
+    nextEventIndex < stage.timeline.length &&
+    stage.timeline[nextEventIndex].time <= stageTime
   ) {
-    const ev = STAGE_TIMELINE[nextEventIndex];
+    const ev = stage.timeline[nextEventIndex];
     spawnEnemy(ev.kind, ev.x);
     nextEventIndex += 1;
   }
@@ -623,10 +771,36 @@ function update(dt: number): void {
         fireEnemyBullet(e.x, e.y, angle);
         e.fireTimer = SNAKE_FIRE_INTERVAL;
       }
-    } else {
+    } else if (e.kind === "spider") {
       // 蜘蛛：糸で上下に伸び縮みしながら（縦に動いて）下りる。
       // 速さをサイン波で増減させ、時には少し上に戻る＝縦のビヨンビヨン感を出す
       e.y += SPIDER_SPEED * (0.6 + Math.sin(e.age * SPIDER_FREQ)) * dt;
+    } else {
+      // 鷲：一定時間ごとに進む向きをランダムに変えて、ふらふら動き回る。
+      // 横は気まぐれ、縦は必ず少しずつ下りる（いつか画面外へ出る）。
+      e.wanderTimer -= dt;
+      if (e.wanderTimer <= 0) {
+        e.vx = (Math.random() * 2 - 1) * EAGLE_WANDER_SPEED;
+        e.vy = EAGLE_FALL_SPEED * (0.4 + Math.random() * 1.2);
+        e.wanderTimer = EAGLE_WANDER_MIN + Math.random() * (EAGLE_WANDER_MAX - EAGLE_WANDER_MIN);
+      }
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+      // 画面の左右端で跳ね返す
+      if (e.x < ENEMY_RADIUS) {
+        e.x = ENEMY_RADIUS;
+        e.vx = Math.abs(e.vx);
+      } else if (e.x > WIDTH - ENEMY_RADIUS) {
+        e.x = WIDTH - ENEMY_RADIUS;
+        e.vx = -Math.abs(e.vx);
+      }
+      // 画面内にいる間は、自機を狙って弾を撃つ
+      e.fireTimer -= dt;
+      if (e.fireTimer <= 0 && e.y > 0 && e.y < HEIGHT - 80) {
+        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+        fireEnemyBullet(e.x, e.y, angle);
+        e.fireTimer = EAGLE_FIRE_INTERVAL;
+      }
     }
   }
 
@@ -684,16 +858,17 @@ function update(dt: number): void {
   }
 
   // --- ボスの登場：道中が終わり、雑魚を全部片付けたら出現 ---
-  if (!bossSpawned && stageTime >= STAGE_DURATION && enemies.length === 0) {
-    spawnBoss();
+  if (!bossSpawned && stageTime >= stage.duration && enemies.length === 0) {
+    spawnBoss(stage.boss);
   }
 
   // --- ボスの行動 ---
   if (boss) {
+    const cfg = BOSS_CONFIG[boss.kind];
     boss.walk += dt * 9; // 移動中ずっと腕と足を振り続ける
 
     // HPが半分以下になった瞬間、一度だけ怒りモードに入る
-    if (!boss.enraged && boss.hp <= BOSS_MAX_HP * BOSS_ENRAGE_RATIO) {
+    if (!boss.enraged && boss.hp <= boss.maxHp * BOSS_ENRAGE_RATIO) {
       boss.enraged = true;
       spawnExplosion(boss.x, boss.y, "#ff3b3b", 30); // 赤い怒りの演出
       playBossHit();
@@ -708,8 +883,8 @@ function update(dt: number): void {
       }
     } else {
       // 怒りモードなら、左右移動も攻撃も激しくなる
-      const swaySpeed = boss.enraged ? BOSS_SWAY_SPEED_ENRAGED : BOSS_SWAY_SPEED;
-      const fireInterval = boss.enraged ? BOSS_FIRE_INTERVAL_ENRAGED : BOSS_FIRE_INTERVAL;
+      const swaySpeed = boss.enraged ? cfg.swaySpeedEnraged : cfg.swaySpeed;
+      const fireInterval = boss.enraged ? cfg.fireIntervalEnraged : cfg.fireInterval;
 
       // 左右に往復しながら、一定間隔で攻撃パターンを撃つ
       boss.x += boss.dir * swaySpeed * dt;
@@ -721,10 +896,18 @@ function update(dt: number): void {
         boss.dir = -1;
       }
 
+      // 前後（上下）の動き：自機に近づいたり離れたりする（機械ゴリラ用）
+      // 怒り時は少し速く・大きく動く
+      if (cfg.bobAmplitude > 0) {
+        boss.moveTime += dt * (boss.enraged ? 1.4 : 1);
+        const amp = boss.enraged ? cfg.bobAmplitude * 1.3 : cfg.bobAmplitude;
+        boss.y = BOSS_Y_TARGET + Math.sin(boss.moveTime * cfg.bobSpeed) * amp;
+      }
+
       boss.fireTimer -= dt;
       if (boss.fireTimer <= 0) {
-        BOSS_PATTERNS[boss.patternIndex](boss);
-        boss.patternIndex = (boss.patternIndex + 1) % BOSS_PATTERNS.length;
+        cfg.patterns[boss.patternIndex](boss);
+        boss.patternIndex = (boss.patternIndex + 1) % cfg.patterns.length;
         // 怒り時は、通常の技に加えて自機を狙う弾も撃つ
         if (boss.enraged) bossPatternAimed(boss);
         boss.fireTimer = fireInterval;
@@ -738,14 +921,7 @@ function update(dt: number): void {
         bullets.splice(bi, 1);
         boss.hp -= 1;
         if (boss.hp <= 0) {
-          spawnExplosion(boss.x, boss.y, "#b15cff", 60); // 大きな爆発
-          playBossExplosion();
-          boss = null;
-          score += SCORE_BOSS;
-          gameState = "clear";
-          resultLock = 0.8;
-          saveHighScoreIfNeeded();
-          setMusic(null); // クリアでBGMを止める
+          defeatBoss(); // 次ステージへ進むか全クリア
           break;
         }
         // まだ生きていれば、被弾の手応えとして低めの音を鳴らす
@@ -1096,11 +1272,80 @@ function drawSpider(cx: number, cy: number): void {
   ctx.restore();
 }
 
+// -------------------------------------------------------------------
+// 敵その4：鷲（ふらふら動く敵）。(cx, cy) が中心。下（自機の方）を向く。
+//   age に応じて翼を羽ばたかせる。
+// -------------------------------------------------------------------
+function drawEagle(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const flap = Math.sin(age * 11) * 5; // 翼の上下の羽ばたき
+
+  // --- 翼（左右に大きく広げる。先ほど羽ばたく）---
+  const BODY = "#7a5230"; // 体のこげ茶
+  const WING = "#5e3f24"; // 翼の濃い茶
+  for (const side of [-1, 1]) {
+    ctx.fillStyle = WING;
+    ctx.beginPath();
+    ctx.moveTo(side * 4, -2);
+    ctx.quadraticCurveTo(side * 18, -8 - flap, side * 26, 2 - flap);
+    ctx.quadraticCurveTo(side * 16, 2, side * 5, 6);
+    ctx.closePath();
+    ctx.fill();
+    // 風切羽の筋
+    ctx.strokeStyle = "#3f2a18";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(side * 10, 0 - flap * 0.5);
+    ctx.lineTo(side * 22, 1 - flap);
+    ctx.stroke();
+  }
+
+  // --- 尾羽（上＝後ろ）---
+  ctx.fillStyle = WING;
+  ctx.beginPath();
+  ctx.moveTo(-5, -6);
+  ctx.lineTo(5, -6);
+  ctx.lineTo(0, -16);
+  ctx.closePath();
+  ctx.fill();
+
+  // --- 胴体 ---
+  ctx.fillStyle = BODY;
+  ctx.beginPath();
+  ctx.ellipse(0, 1, 6, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 頭（白い・下向き＝自機の方）---
+  ctx.fillStyle = "#f0ece2";
+  ctx.beginPath();
+  ctx.arc(0, 10, 5, 0, Math.PI * 2);
+  ctx.fill();
+  // くちばし（黄色・下を向く）
+  ctx.fillStyle = "#f2b134";
+  ctx.beginPath();
+  ctx.moveTo(-2.5, 13);
+  ctx.lineTo(2.5, 13);
+  ctx.lineTo(0, 19);
+  ctx.closePath();
+  ctx.fill();
+  // 目（鋭い黒目）
+  ctx.fillStyle = "#1c1208";
+  ctx.beginPath();
+  ctx.arc(-2.2, 9, 1.1, 0, Math.PI * 2);
+  ctx.arc(2.2, 9, 1.1, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 // 敵を種類に応じた姿で描く
 function drawEnemy(e: Enemy): void {
   if (e.kind === "snail") drawSnail(e.x, e.y);
   else if (e.kind === "snake") drawSnake(e.x, e.y);
-  else drawSpider(e.x, e.y);
+  else if (e.kind === "spider") drawSpider(e.x, e.y);
+  else drawEagle(e.x, e.y, e.age);
 }
 
 // -------------------------------------------------------------------
@@ -1223,6 +1468,141 @@ function drawGorillaBoss(cx: number, cy: number, walk: number, enraged = false):
   ctx.restore();
 }
 
+// -------------------------------------------------------------------
+// ボス：機械のゴリラ（ステージ2）。(cx, cy) が中心。
+//   walk が大きいほど腕と足が動く。enraged=true で目とコアが赤く光る。
+// -------------------------------------------------------------------
+function drawMachineGorillaBoss(cx: number, cy: number, walk: number, enraged = false): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const swing = Math.sin(walk);
+  const bob = Math.sin(walk * 2) * 1.5;
+  const glow = enraged ? "#ff4040" : "#5cd6ff"; // 光る部分の色
+
+  // 怒りモードでは赤いオーラが脈打つ
+  if (enraged) {
+    const pulse = 0.5 + 0.5 * Math.sin(walk * 1.5);
+    ctx.save();
+    ctx.globalAlpha = 0.22 + pulse * 0.22;
+    ctx.fillStyle = "#ff3b3b";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 42 + pulse * 5, 48 + pulse * 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.translate(0, bob);
+
+  const METAL = "#8a93a3"; // 金属の明るい灰
+  const METAL_DARK = "#525a68"; // 金属の暗い灰
+  const JOINT = "#2e333d"; // 関節・すきまの黒っぽい色
+
+  // --- 足（角ばった脚。左右で逆に踏み出す）---
+  ctx.fillStyle = METAL_DARK;
+  for (const side of [-1, 1]) {
+    const sx = side * 11;
+    const step = side === -1 ? swing * 6 : -swing * 6;
+    ctx.fillRect(sx - 7, 14, 14, 16);
+    ctx.fillStyle = JOINT;
+    ctx.fillRect(sx - 9 + step, 30, 18, 6); // 足の甲
+    ctx.fillStyle = METAL_DARK;
+  }
+
+  // --- 腕（長く太い、ゴリラのように下へ伸びる腕。足と逆に振る。先端は砲口）---
+  for (const side of [-1, 1]) {
+    const sw = side * swing * 6;
+    const sx = side * 26; // ひじ〜こぶしの外側位置
+    // 太い腕（厚い線で描く）
+    ctx.strokeStyle = METAL;
+    ctx.lineWidth = 16;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(side * 16, -12);
+    ctx.lineTo(sx, 26 + sw);
+    ctx.stroke();
+    // 肩の関節
+    ctx.fillStyle = JOINT;
+    ctx.beginPath();
+    ctx.arc(side * 16, -12, 7, 0, Math.PI * 2);
+    ctx.fill();
+    // こぶし（砲口）
+    ctx.fillStyle = METAL_DARK;
+    ctx.beginPath();
+    ctx.arc(sx, 30 + sw, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(sx, 30 + sw, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- 胴体（角ばった装甲）---
+  ctx.fillStyle = METAL;
+  ctx.fillRect(-20, -16, 40, 38);
+  // 装甲のフチ
+  ctx.strokeStyle = JOINT;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-20, -16, 40, 38);
+  // パネルの線
+  ctx.beginPath();
+  ctx.moveTo(-20, -2);
+  ctx.lineTo(20, -2);
+  ctx.stroke();
+  // 胸の動力コア（光る丸）
+  const corePulse = 0.6 + 0.4 * Math.sin(walk * 3);
+  ctx.fillStyle = glow;
+  ctx.globalAlpha = 0.5 + corePulse * 0.5;
+  ctx.beginPath();
+  ctx.arc(0, 6, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(0, 6, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 頭（金属のヘルメット）---
+  ctx.fillStyle = METAL;
+  ctx.fillRect(-14, -40, 28, 22);
+  ctx.strokeStyle = JOINT;
+  ctx.strokeRect(-14, -40, 28, 22);
+  // 耳のような側面パーツ
+  ctx.fillStyle = METAL_DARK;
+  ctx.fillRect(-18, -34, 4, 10);
+  ctx.fillRect(14, -34, 4, 10);
+  // バイザー（横長の光る目）
+  ctx.fillStyle = "#15171c";
+  ctx.fillRect(-11, -33, 22, 8);
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(-5, -29, 2.4, 0, Math.PI * 2);
+  ctx.arc(5, -29, 2.4, 0, Math.PI * 2);
+  ctx.fill();
+  // アンテナ
+  ctx.strokeStyle = METAL_DARK;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, -40);
+  ctx.lineTo(0, -48);
+  ctx.stroke();
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(0, -49, 2, 0, Math.PI * 2);
+  ctx.fill();
+  // 口元のグリル（への字）
+  ctx.strokeStyle = JOINT;
+  ctx.lineWidth = 1.5;
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * 5 - 2, -22);
+    ctx.lineTo(i * 5 - 2, -19);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 // 遠い山（暗い青のなだらかな影）
 function drawHill(d: Deco): void {
   ctx.fillStyle = "#161f38";
@@ -1260,28 +1640,82 @@ function drawGround(d: Deco): void {
   ctx.stroke();
 }
 
+// --- ここから「地球の空」テーマの背景パーツ ---
+
+// 海面のきらめき（明るい水色の細長い波）。いちばん奥。
+function drawSeaSparkle(d: Deco): void {
+  const s = d.scale;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y, 40 * s, 4 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// 緑の島（上から見た陸地。砂浜のふち付き）。中間。
+function drawIsland(d: Deco): void {
+  const s = d.scale;
+  // 砂浜（外側の薄い砂色）
+  ctx.fillStyle = "#e6d6a0";
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y, 44 * s, 30 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 緑の陸地（内側）
+  ctx.fillStyle = "#4e9e4e";
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y, 36 * s, 23 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 濃い緑の茂み
+  ctx.fillStyle = "#3a7d3a";
+  ctx.beginPath();
+  ctx.ellipse(d.x - 8 * s, d.y - 4 * s, 12 * s, 9 * s, 0, 0, Math.PI * 2);
+  ctx.ellipse(d.x + 10 * s, d.y + 5 * s, 10 * s, 7 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// 白い雲（手前をふわっと流れる）。いちばん手前。
+function drawCloudWhite(d: Deco): void {
+  const s = d.scale;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+  const puffs: [number, number, number, number][] = [
+    [-18, 2, 15, 10],
+    [0, -4, 20, 13],
+    [18, 2, 15, 10],
+    [4, 6, 13, 9],
+  ];
+  for (const [ox, oy, rx, ry] of puffs) {
+    ctx.beginPath();
+    ctx.ellipse(d.x + ox * s, d.y + oy * s, rx * s, ry * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// 背景をテーマに応じて描く（夜空 or 地球の空）
+function drawBackground(): void {
+  if (theme === "night") {
+    // 夜空：グラデーション → 遠い山 → 星 → 雲 → 近い島
+    ctx.fillStyle = skyGradientNight;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    for (const d of farHills) drawHill(d);
+    ctx.fillStyle = "#aab4ff";
+    for (const s of stars) ctx.fillRect(s.x, s.y, s.size, s.size);
+    for (const d of clouds) drawCloud(d);
+    for (const d of nearGround) drawGround(d);
+  } else {
+    // 地球の空：水色グラデーション → 海のきらめき → 緑の島 → 白い雲
+    ctx.fillStyle = skyGradientDay;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    for (const d of farHills) drawSeaSparkle(d);
+    for (const d of nearGround) drawIsland(d);
+    for (const d of clouds) drawCloudWhite(d);
+  }
+}
+
 // -------------------------------------------------------------------
 // render: 今の状態を画面に描く
 // -------------------------------------------------------------------
 function render(): void {
-  // 背景の夜空（グラデーション）
-  ctx.fillStyle = skyGradient;
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-  // いちばん奥：遠い山
-  for (const d of farHills) drawHill(d);
-
-  // 星
-  ctx.fillStyle = "#aab4ff";
-  for (const s of stars) {
-    ctx.fillRect(s.x, s.y, s.size, s.size);
-  }
-
-  // 中間：流れる雲
-  for (const d of clouds) drawCloud(d);
-
-  // 手前：近い地面の島
-  for (const d of nearGround) drawGround(d);
+  // 背景（夜空 or 地球の空。テーマで切り替わる）
+  drawBackground();
 
   // タイトル画面（流れる星の上にタイトルだけ表示）
   if (gameState === "title") {
@@ -1320,15 +1754,19 @@ function render(): void {
     drawCabbage(it.x, it.y);
   }
 
-  // ボス（腕と足が動くゴリラ）＋ HPバー
+  // ボス（種類に応じた姿）＋ HPバー
   if (boss) {
-    drawGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
+    if (boss.kind === "machineGorilla") {
+      drawMachineGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
+    } else {
+      drawGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
+    }
     // 画面上部のHPバー
     const barW = WIDTH - 40;
-    const ratio = Math.max(0, boss.hp / BOSS_MAX_HP);
+    const ratio = Math.max(0, boss.hp / boss.maxHp);
     ctx.fillStyle = "#3a1a3a";
     ctx.fillRect(20, 12, barW, 10);
-    ctx.fillStyle = "#ff5cc8";
+    ctx.fillStyle = boss.kind === "machineGorilla" ? "#5cd6ff" : "#ff5cc8";
     ctx.fillRect(20, 12, barW * ratio, 10);
   }
 
@@ -1389,6 +1827,15 @@ function render(): void {
   ctx.fillText(`Lives: ${"▲".repeat(Math.max(0, player.lives))}`, 10, 74);
   ctx.fillText(`Power: ${player.power} / ${POWER_MAX}`, 10, 92);
   ctx.fillText(`Bomb: ${player.bombs > 0 ? "●".repeat(player.bombs) : "なし"}`, 10, 110);
+
+  // ステージ開始時のバナー（「STAGE 2」など）。ボスがいない間だけ表示。
+  if (stageBanner > 0 && !boss) {
+    ctx.textAlign = "center";
+    ctx.fillStyle = theme === "night" ? "#5cff9d" : "#ffffff";
+    ctx.font = "bold 34px monospace";
+    ctx.fillText(stage.name, WIDTH / 2, HEIGHT / 2);
+    ctx.textAlign = "left";
+  }
 
   // 「WARNING」表示：ボス入場中の演出
   if (boss && boss.phase === "enter") {
