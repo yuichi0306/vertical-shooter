@@ -1,8 +1,7 @@
 // ===================================================================
-// ステップ7: ボス戦（体力・攻撃パターン・敵の弾・クリア）
-//   - 道中クリア後にボスが登場
-//   - ボスは攻撃パターンで弾をばらまく／自機を狙う
-//   - ボスのHPを0にするとゲームクリア
+// ステップ8: タイトル画面・スコア・ハイスコア保存
+//   - タイトル → ゲーム → 決着 → タイトル の流れ
+//   - スコアを加算、ハイスコアをブラウザ(localStorage)に保存
 // ===================================================================
 
 import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
@@ -82,10 +81,34 @@ const player = {
 };
 
 // ゲーム全体の状態。
-// （タイトル画面はステップ8で追加します）
-type GameState = "playing" | "gameover" | "clear";
-let gameState: GameState = "playing";
-let resultLock = 0; // 決着直後、リスタート入力を受け付けない時間（秒）
+type GameState = "title" | "playing" | "gameover" | "clear";
+let gameState: GameState = "title"; // 起動時はタイトル画面から
+let resultLock = 0; // 決着直後、入力を受け付けない時間（秒）
+let titleLock = 0; // タイトルに戻った直後、入力を受け付けない時間（秒）
+
+// スコア
+const SCORE_ENEMY = 100; // 雑魚1体撃破
+const SCORE_BOSS = 5000; // ボス撃破
+let score = 0;
+
+// ハイスコア（ブラウザに保存して次回も残す）
+const HIGHSCORE_KEY = "vshooter.highscore";
+
+function loadHighScore(): number {
+  const v = localStorage.getItem(HIGHSCORE_KEY);
+  return v ? Number(v) || 0 : 0;
+}
+
+function saveHighScoreIfNeeded(): void {
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem(HIGHSCORE_KEY, String(highScore));
+    newRecord = true;
+  }
+}
+
+let highScore = loadHighScore();
+let newRecord = false; // 今回のプレイでハイスコアを更新したか
 
 // -------------------------------------------------------------------
 // 自機のショット（弾）
@@ -239,6 +262,7 @@ function damagePlayer(): void {
   if (player.lives <= 0) {
     gameState = "gameover";
     resultLock = 0.8; // 誤リスタート防止
+    saveHighScoreIfNeeded();
   } else {
     player.invincible = INVINCIBLE_TIME; // しばらく無敵で復活
   }
@@ -261,6 +285,8 @@ function resetGame(): void {
   stageTime = 0;
   nextEventIndex = 0;
   defeated = 0;
+  score = 0;
+  newRecord = false;
   gameState = "playing";
 }
 
@@ -284,10 +310,6 @@ function hit(
   return dx * dx + dy * dy < r * r;
 }
 
-// FPS計測用
-let fps = 0;
-let fpsTimer = 0;
-let fpsCount = 0;
 
 // -------------------------------------------------------------------
 // update: ゲームの状態を「STEP秒ぶん」進める（固定タイムステップ）
@@ -302,10 +324,20 @@ function update(dt: number): void {
     }
   }
 
-  // 決着後（ゲームオーバー / クリア）は、リスタート入力だけ受け付ける
+  // タイトル画面：キーでゲーム開始
+  if (gameState === "title") {
+    if (titleLock > 0) titleLock -= dt;
+    else if (isDown("KeyZ", "Space", "Enter")) resetGame();
+    return;
+  }
+
+  // 決着後（ゲームオーバー / クリア）は、キーでタイトルへ戻る
   if (gameState === "gameover" || gameState === "clear") {
     if (resultLock > 0) resultLock -= dt;
-    else if (isDown("KeyZ", "Space", "Enter")) resetGame();
+    else if (isDown("KeyZ", "Space", "Enter")) {
+      gameState = "title";
+      titleLock = 0.4; // 押しっぱなしで即スタートしないように
+    }
     return;
   }
 
@@ -385,6 +417,7 @@ function update(dt: number): void {
         if (e.hp <= 0) {
           enemies.splice(ei, 1); // 敵を倒した
           defeated += 1;
+          score += SCORE_ENEMY;
           // 一定確率でパワーアップアイテムを落とす
           if (Math.random() < ITEM_DROP_RATE) {
             items.push({ x: e.x, y: e.y });
@@ -465,8 +498,10 @@ function update(dt: number): void {
         boss.hp -= 1;
         if (boss.hp <= 0) {
           boss = null;
+          score += SCORE_BOSS;
           gameState = "clear";
           resultLock = 0.8;
+          saveHighScoreIfNeeded();
           break;
         }
       }
@@ -504,6 +539,23 @@ function render(): void {
   ctx.fillStyle = "#aab4ff";
   for (const s of stars) {
     ctx.fillRect(s.x, s.y, s.size, s.size);
+  }
+
+  // タイトル画面（流れる星の上にタイトルだけ表示）
+  if (gameState === "title") {
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#5cff9d";
+    ctx.font = "bold 34px monospace";
+    ctx.fillText("VERTICAL", WIDTH / 2, HEIGHT / 2 - 70);
+    ctx.fillText("SHOOTER", WIDTH / 2, HEIGHT / 2 - 30);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "16px monospace";
+    ctx.fillText(`HI-SCORE  ${highScore}`, WIDTH / 2, HEIGHT / 2 + 20);
+    ctx.fillText("Z / Space でスタート", WIDTH / 2, HEIGHT / 2 + 60);
+    ctx.font = "12px monospace";
+    ctx.fillText("移動: 矢印/WASD   ショット: Z/Space", WIDTH / 2, HEIGHT - 40);
+    ctx.textAlign = "left";
+    return; // タイトル中はここで描画終了
   }
 
   // 敵（種類で色分け：まっすぐ=赤、揺れる=オレンジ）
@@ -574,14 +626,13 @@ function render(): void {
     ctx.fill();
   }
 
-  // 動作確認用の文字
+  // プレイ中の情報表示（スコア・残機・パワー）
   ctx.fillStyle = "#ffffff";
   ctx.font = "14px monospace";
-  ctx.fillText(`FPS: ${fps}`, 10, 22);
-  ctx.fillText(`Defeated: ${defeated}`, 10, 42);
-  ctx.fillText(`Lives: ${"▲".repeat(Math.max(0, player.lives))}`, 10, 62);
-  ctx.fillText(`Power: ${player.power} / ${POWER_MAX}`, 10, 82);
-  ctx.fillText("Move: Arrow/WASD   Shot: Z/Space", 10, 102);
+  ctx.fillText(`SCORE ${score}`, 10, 38);
+  ctx.fillText(`HI ${highScore}`, 10, 56);
+  ctx.fillText(`Lives: ${"▲".repeat(Math.max(0, player.lives))}`, 10, 74);
+  ctx.fillText(`Power: ${player.power} / ${POWER_MAX}`, 10, 92);
 
   // 「WARNING」表示：ボス入場中の演出
   if (boss && boss.phase === "enter") {
@@ -595,16 +646,23 @@ function render(): void {
   // 決着画面（ゲームオーバー / クリア）
   if (gameState === "gameover" || gameState === "clear") {
     const cleared = gameState === "clear";
-    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
-    ctx.fillStyle = cleared ? "#7dff9d" : "#ffffff";
     ctx.textAlign = "center";
+    ctx.fillStyle = cleared ? "#7dff9d" : "#ffffff";
     ctx.font = "40px monospace";
-    ctx.fillText(cleared ? "STAGE CLEAR!" : "GAME OVER", WIDTH / 2, HEIGHT / 2 - 20);
+    ctx.fillText(cleared ? "STAGE CLEAR!" : "GAME OVER", WIDTH / 2, HEIGHT / 2 - 50);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "16px monospace";
-    ctx.fillText(`Defeated: ${defeated}`, WIDTH / 2, HEIGHT / 2 + 20);
-    ctx.fillText("Z / Space でリスタート", WIDTH / 2, HEIGHT / 2 + 50);
+    ctx.font = "18px monospace";
+    ctx.fillText(`SCORE  ${score}`, WIDTH / 2, HEIGHT / 2);
+    ctx.fillText(`HI-SCORE  ${highScore}`, WIDTH / 2, HEIGHT / 2 + 26);
+    if (newRecord) {
+      ctx.fillStyle = "#fff36b";
+      ctx.fillText("NEW RECORD!", WIDTH / 2, HEIGHT / 2 + 54);
+    }
+    ctx.fillStyle = "#bbbbbb";
+    ctx.font = "14px monospace";
+    ctx.fillText("Z / Space でタイトルへ", WIDTH / 2, HEIGHT / 2 + 90);
     ctx.textAlign = "left";
   }
 }
@@ -627,14 +685,6 @@ function frame(now: number): void {
   }
 
   render();
-
-  fpsCount++;
-  fpsTimer += elapsed;
-  if (fpsTimer >= 1) {
-    fps = fpsCount;
-    fpsCount = 0;
-    fpsTimer -= 1;
-  }
 
   requestAnimationFrame(frame);
 }
