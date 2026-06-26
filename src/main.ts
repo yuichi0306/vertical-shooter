@@ -5,7 +5,7 @@
 // ===================================================================
 
 import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
-import { initAudio, playShot, playExplosion, playHit } from "./audio";
+import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion } from "./audio";
 
 // ゲーム内部の解像度（座標はすべてこのサイズを基準に書く）
 const WIDTH = 480;
@@ -549,7 +549,7 @@ function update(dt: number): void {
         boss.hp -= 1;
         if (boss.hp <= 0) {
           spawnExplosion(boss.x, boss.y, "#b15cff", 60); // 大きな爆発
-          playExplosion();
+          playBossExplosion();
           boss = null;
           score += SCORE_BOSS;
           gameState = "clear";
@@ -557,6 +557,8 @@ function update(dt: number): void {
           saveHighScoreIfNeeded();
           break;
         }
+        // まだ生きていれば、被弾の手応えとして低めの音を鳴らす
+        playBossHit();
       }
     }
   }

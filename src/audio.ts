@@ -87,6 +87,23 @@ export function playExplosion(): void {
   noise(0.25, 0.25);
 }
 
+// ボス被弾：少し低めの「コッ」という短い音
+export function playBossHit(): void {
+  tone(160, 0.08, "square", 0.06, 90);
+}
+
+// ボス撃破：長く尾を引く派手な大爆発（ノイズを重ねつつ低音を轟かせる）
+export function playBossExplosion(): void {
+  // 太く長いノイズの本体
+  noise(0.9, 0.35);
+  // 一拍おいて二の爆発を重ね、ドドンと連続する迫力を出す
+  setTimeout(() => noise(0.7, 0.28), 120);
+  // 地響きのような低音の轟き
+  tone(90, 1.0, "sawtooth", 0.22, 30);
+  // 上から下へ崩れ落ちる金属的な余韻
+  tone(440, 0.8, "square", 0.1, 50);
+}
+
 // 被弾：低めの下降音 ＋ ノイズ
 export function playHit(): void {
   tone(220, 0.3, "sawtooth", 0.18, 60);
