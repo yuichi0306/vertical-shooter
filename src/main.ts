@@ -1,7 +1,7 @@
 // ===================================================================
-// ステップ4: 敵の出現をデータ駆動タイムラインに置き換え
-//   - 出現の内容は src/stage.ts のデータで管理
-//   - 敵の種類（まっすぐ / 左右に揺れる）に対応
+// ステップ5: 自機の被弾（残機・無敵時間・ゲームオーバー）
+//   - 敵に触れると1機減り、しばらく無敵（点滅）で復活
+//   - 残機0でゲームオーバー → キーでリスタート
 // ===================================================================
 
 import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
@@ -68,11 +68,22 @@ for (let i = 0; i < 80; i++) {
 const PLAYER_SPEED = 260; // 1秒あたりに動くピクセル数
 const PLAYER_RADIUS = 11; // 見た目／画面端で止まるときの半径
 
+const START_LIVES = 3; // 開始時の残機
+const INVINCIBLE_TIME = 2.0; // 被弾後の無敵時間（秒）
+
 const player = {
   x: WIDTH / 2,
   y: HEIGHT - 90,
   fireCooldown: 0, // 次に撃てるようになるまでの残り時間（秒）
+  lives: START_LIVES, // 残機
+  invincible: 0, // 残りの無敵時間（秒）。0より大きい間は無敵
 };
+
+// ゲーム全体の状態。今は「プレイ中」と「ゲームオーバー」の2つ。
+// （タイトル画面はステップ8で追加します）
+type GameState = "playing" | "gameover";
+let gameState: GameState = "playing";
+let gameoverLock = 0; // ゲームオーバー直後、リスタート入力を受け付けない時間（秒）
 
 // -------------------------------------------------------------------
 // 自機のショット（弾）
@@ -114,6 +125,21 @@ function spawnEnemy(kind: EnemyKind, xRatio: number): void {
   enemies.push({ x, y: -ENEMY_RADIUS, hp: ENEMY_HP, kind, baseX: x, age: 0 });
 }
 
+// ゲームを最初の状態に戻す（開始時とリスタート時に呼ぶ）
+function resetGame(): void {
+  player.x = WIDTH / 2;
+  player.y = HEIGHT - 90;
+  player.fireCooldown = 0;
+  player.lives = START_LIVES;
+  player.invincible = 0;
+  bullets.length = 0;
+  enemies.length = 0;
+  stageTime = 0;
+  nextEventIndex = 0;
+  defeated = 0;
+  gameState = "playing";
+}
+
 // 倒した数（スコアの土台。正式なスコア表示はステップ8で整える）
 let defeated = 0;
 
@@ -143,7 +169,7 @@ let fpsCount = 0;
 // update: ゲームの状態を「STEP秒ぶん」進める（固定タイムステップ）
 // -------------------------------------------------------------------
 function update(dt: number): void {
-  // --- 背景の星 ---
+  // --- 背景の星（ゲームオーバー中も流し続ける）---
   for (const s of stars) {
     s.y += s.speed * dt;
     if (s.y > HEIGHT) {
@@ -151,6 +177,16 @@ function update(dt: number): void {
       s.x = Math.random() * WIDTH;
     }
   }
+
+  // ゲームオーバー中は、キー入力でのリスタートだけ受け付ける
+  if (gameState === "gameover") {
+    if (gameoverLock > 0) gameoverLock -= dt;
+    else if (isDown("KeyZ", "Space", "Enter")) resetGame();
+    return;
+  }
+
+  // 無敵時間を減らす
+  if (player.invincible > 0) player.invincible -= dt;
 
   // --- 自機の移動 ---
   let dx = 0;
@@ -229,7 +265,25 @@ function update(dt: number): void {
     }
   }
 
-  // --- 画面の下に出た敵を消す（今は素通り。被弾はステップ5で実装）---
+  // --- 当たり判定：敵 × 自機（無敵中は当たらない）---
+  if (player.invincible <= 0) {
+    for (let ei = enemies.length - 1; ei >= 0; ei--) {
+      const e = enemies[ei];
+      if (hit(player.x, player.y, PLAYER_RADIUS, e.x, e.y, ENEMY_RADIUS)) {
+        enemies.splice(ei, 1); // ぶつかった敵は壊れる
+        player.lives -= 1; // 残機を1減らす
+        if (player.lives <= 0) {
+          gameState = "gameover";
+          gameoverLock = 0.8; // 0.8秒は入力を無視（誤リスタート防止）
+        } else {
+          player.invincible = INVINCIBLE_TIME; // しばらく無敵で復活
+        }
+        break;
+      }
+    }
+  }
+
+  // --- 画面の下に出た敵を消す ---
   for (let i = enemies.length - 1; i >= 0; i--) {
     if (enemies[i].y > HEIGHT + ENEMY_RADIUS) enemies.splice(i, 1);
   }
@@ -266,29 +320,53 @@ function render(): void {
     ctx.fillRect(b.x - 2, b.y - 8, 4, 12);
   }
 
-  // 自機（上向きの三角形）
-  ctx.fillStyle = "#5cff9d";
-  ctx.beginPath();
-  ctx.moveTo(player.x, player.y - 14);
-  ctx.lineTo(player.x - 11, player.y + 12);
-  ctx.lineTo(player.x + 11, player.y + 12);
-  ctx.closePath();
-  ctx.fill();
+  // 自機（上向きの三角形）。無敵中だけ点滅させ、それ以外は常に表示。
+  // ゲームオーバー中は自機を描かない。
+  const blinkVisible =
+    player.invincible <= 0 || Math.floor(player.invincible * 10) % 2 === 0;
+  if (gameState !== "gameover" && blinkVisible) {
+    ctx.fillStyle = "#5cff9d";
+    ctx.beginPath();
+    ctx.moveTo(player.x, player.y - 14);
+    ctx.lineTo(player.x - 11, player.y + 12);
+    ctx.lineTo(player.x + 11, player.y + 12);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   // 動作確認用の文字
   ctx.fillStyle = "#ffffff";
   ctx.font = "14px monospace";
   ctx.fillText(`FPS: ${fps}`, 10, 22);
   ctx.fillText(`Defeated: ${defeated}`, 10, 42);
-  ctx.fillText("Move: Arrow/WASD   Shot: Z/Space", 10, 62);
+  ctx.fillText(`Lives: ${"▲".repeat(Math.max(0, player.lives))}`, 10, 62);
+  ctx.fillText("Move: Arrow/WASD   Shot: Z/Space", 10, 82);
 
   // 道中が終わり、敵も全部いなくなったら表示（ボスはステップ7で接続）
-  if (stageTime >= STAGE_DURATION && enemies.length === 0) {
+  if (
+    gameState === "playing" &&
+    stageTime >= STAGE_DURATION &&
+    enemies.length === 0
+  ) {
     ctx.textAlign = "center";
     ctx.font = "28px monospace";
     ctx.fillText("STAGE CLEAR (道中)", WIDTH / 2, HEIGHT / 2);
     ctx.font = "14px monospace";
     ctx.fillText("ボスはステップ7で登場します", WIDTH / 2, HEIGHT / 2 + 28);
+    ctx.textAlign = "left";
+  }
+
+  // ゲームオーバー画面
+  if (gameState === "gameover") {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.font = "40px monospace";
+    ctx.fillText("GAME OVER", WIDTH / 2, HEIGHT / 2 - 20);
+    ctx.font = "16px monospace";
+    ctx.fillText(`Defeated: ${defeated}`, WIDTH / 2, HEIGHT / 2 + 20);
+    ctx.fillText("Z / Space でリスタート", WIDTH / 2, HEIGHT / 2 + 50);
     ctx.textAlign = "left";
   }
 }
