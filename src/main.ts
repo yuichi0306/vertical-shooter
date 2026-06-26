@@ -424,7 +424,7 @@ function update(dt: number): void {
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
   if (isDown("KeyZ", "Space") && player.fireCooldown <= 0) {
     fireShot();
-    playShot();
+    playShot(player.power);
     player.fireCooldown = FIRE_INTERVAL;
   }
 
@@ -687,6 +687,58 @@ function drawPlayerGiraffeTurtle(cx: number, cy: number, lean = 0): void {
 }
 
 // -------------------------------------------------------------------
+// パワーアップアイテムをキャベツの姿で描く。(cx, cy) が中心。
+// -------------------------------------------------------------------
+function drawCabbage(cx: number, cy: number): void {
+  const s = ITEM_RADIUS / 10; // ITEM_RADIUS に合わせて拡大縮小
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(s, s);
+
+  // 外側の葉（濃い緑のギザギザした輪郭）
+  ctx.fillStyle = "#5aa336";
+  for (let a = 0; a < 6; a++) {
+    const ang = (a / 6) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.ellipse(Math.cos(ang) * 5, Math.sin(ang) * 5, 5.5, 4.2, ang, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 葉のあいだの陰影（少し明るい緑）
+  ctx.fillStyle = "#6cb33f";
+  ctx.beginPath();
+  ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 内側の丸い玉（明るい緑）
+  ctx.fillStyle = "#9bd96f";
+  ctx.beginPath();
+  ctx.arc(-0.5, -0.5, 6.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 葉脈（中心から外へ伸びるカーブ）
+  ctx.strokeStyle = "#5aa336";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, 3);
+  ctx.quadraticCurveTo(-4, -1, -2.5, -6);
+  ctx.moveTo(0, 3);
+  ctx.quadraticCurveTo(4, -1, 2.5, -6);
+  ctx.moveTo(0, 4);
+  ctx.quadraticCurveTo(-6, 2, -6.5, -2);
+  ctx.moveTo(0, 4);
+  ctx.quadraticCurveTo(6, 2, 6.5, -2);
+  ctx.stroke();
+
+  // 中心の芯（うずまきの中心）
+  ctx.fillStyle = "#c6ec9f";
+  ctx.beginPath();
+  ctx.arc(0, 1, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
 // render: 今の状態を画面に描く
 // -------------------------------------------------------------------
 function render(): void {
@@ -728,15 +780,9 @@ function render(): void {
     );
   }
 
-  // パワーアップアイテム（青い四角に P）
+  // パワーアップアイテム（キャベツ）
   for (const it of items) {
-    ctx.fillStyle = "#3da9ff";
-    ctx.fillRect(it.x - ITEM_RADIUS, it.y - ITEM_RADIUS, ITEM_RADIUS * 2, ITEM_RADIUS * 2);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 14px monospace";
-    ctx.textAlign = "center";
-    ctx.fillText("P", it.x, it.y + 5);
-    ctx.textAlign = "left";
+    drawCabbage(it.x, it.y);
   }
 
   // ボス（紫の大きな四角）＋ HPバー
