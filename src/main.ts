@@ -519,7 +519,7 @@ function spawnBoss(kind: BossKind): void {
     enraged: false,
   };
   bossSpawned = true;
-  setMusic("boss"); // ボス登場でBGMを切り替え
+  setMusic(stage.bossMusic); // ボス登場でそのステージのボスBGMに切り替え
 }
 
 // 敵弾を1発、指定の向き（角度ラジアン）に撃つ
@@ -711,7 +711,7 @@ function advanceStage(): void {
   bullets.length = 0;
   items.length = 0;
   stageBanner = STAGE_BANNER_TIME; // 「STAGE 2」などを表示
-  setMusic("normal"); // 道中の通常BGMに戻す
+  setMusic(stage.normalMusic); // そのステージの道中BGMに切り替え
 }
 
 // ゲームを最初の状態に戻す（開始時とリスタート時に呼ぶ）
@@ -750,7 +750,7 @@ function resetGame(): void {
   touchFire = false;
   touchRoles.clear();
   gameState = "playing";
-  setMusic("normal"); // 道中は通常BGM
+  setMusic(stage.normalMusic); // 道中はそのステージの通常BGM
 }
 
 // 倒した数（スコアの土台。正式なスコア表示はステップ8で整える）

@@ -140,19 +140,33 @@ function midiToFreq(m: number): number {
   return 440 * Math.pow(2, (m - 69) / 12);
 }
 
-// --- 2曲ぶんの楽譜（16ステップ。数字=音の高さ、0=休符）---
-// 通常BGM：明るく軽快（ハ長調）
+// --- 楽譜（16ステップ。数字=音の高さ、0=休符）---
+// 通常BGM（ステージ1）：明るく軽快（ハ長調）
 const NORMAL_BASS = [36, 0, 48, 0, 41, 0, 53, 0, 43, 0, 55, 0, 45, 0, 57, 0];
 const NORMAL_LEAD = [72, 76, 79, 76, 77, 76, 74, 0, 74, 71, 74, 76, 79, 0, 76, 0];
-// ボス戦BGM：緊迫感のある短調・速め
+// ボス戦BGM（ステージ1）：緊迫感のある短調・速め
 const BOSS_BASS = [38, 38, 38, 38, 38, 38, 41, 42, 36, 36, 36, 36, 36, 36, 40, 41];
 const BOSS_LEAD = [69, 0, 68, 69, 72, 0, 69, 0, 67, 0, 65, 67, 69, 0, 68, 0];
 
-// 1ステップの長さ（秒）。ボスのほうが速い＝あおられる感じ
-const STEP_DUR = { normal: 0.21, boss: 0.16 } as const;
+// 通常BGM（ステージ2）：颯爽とした疾走感（ニ長調・I-V-vi-IV の爽快な進行）
+const NORMAL2_BASS = [38, 50, 38, 45, 45, 57, 45, 52, 47, 59, 47, 54, 43, 55, 43, 50];
+const NORMAL2_LEAD = [74, 0, 76, 78, 81, 0, 78, 0, 76, 0, 78, 81, 83, 0, 81, 0];
+// ボス戦BGM（ステージ2）：颯爽・勇ましい（Em-C-G-D の壮大な進行・速い）
+const BOSS2_BASS = [40, 40, 52, 40, 36, 36, 48, 36, 43, 43, 55, 43, 38, 38, 50, 38];
+const BOSS2_LEAD = [76, 79, 83, 0, 84, 0, 83, 79, 79, 83, 84, 0, 81, 78, 74, 0];
+
+// 各曲の設定（楽譜・ベースの波形・1ステップの長さ）。ステップが短い＝速い曲
+type TrackDef = { bass: number[]; lead: number[]; bassWave: OscillatorType; stepDur: number };
+const TRACKS = {
+  normal: { bass: NORMAL_BASS, lead: NORMAL_LEAD, bassWave: "triangle", stepDur: 0.21 },
+  boss: { bass: BOSS_BASS, lead: BOSS_LEAD, bassWave: "sawtooth", stepDur: 0.16 },
+  normal2: { bass: NORMAL2_BASS, lead: NORMAL2_LEAD, bassWave: "triangle", stepDur: 0.165 },
+  boss2: { bass: BOSS2_BASS, lead: BOSS2_LEAD, bassWave: "sawtooth", stepDur: 0.135 },
+} satisfies Record<string, TrackDef>;
+
 const MUSIC_VOL = 0.35; // BGM全体の音量（効果音より控えめに）
 
-type MusicTrack = "normal" | "boss";
+export type MusicTrack = keyof typeof TRACKS;
 
 let musicGain: GainNode | null = null; // BGM全体の音量つまみ
 let musicTrack: MusicTrack | null = null; // 今鳴らしている曲（null=無音）
@@ -191,20 +205,19 @@ function musicTone(
 
 // 1ステップぶん（ベース＋メロディ）を予約する
 function playStep(track: MusicTrack, step: number, time: number, stepDur: number): void {
-  const bass = track === "normal" ? NORMAL_BASS : BOSS_BASS;
-  const lead = track === "normal" ? NORMAL_LEAD : BOSS_LEAD;
-  if (bass[step]) {
-    musicTone(midiToFreq(bass[step]), time, stepDur * 0.9, track === "boss" ? "sawtooth" : "triangle", 0.15);
+  const def = TRACKS[track];
+  if (def.bass[step]) {
+    musicTone(midiToFreq(def.bass[step]), time, stepDur * 0.9, def.bassWave, 0.15);
   }
-  if (lead[step]) {
-    musicTone(midiToFreq(lead[step]), time, stepDur * 0.8, "square", 0.1);
+  if (def.lead[step]) {
+    musicTone(midiToFreq(def.lead[step]), time, stepDur * 0.8, "square", 0.1);
   }
 }
 
 // 少し先（約0.12秒）まで、来たぶんのステップを予約し続ける
 function scheduler(): void {
   if (!ctx || !musicTrack) return;
-  const stepDur = STEP_DUR[musicTrack];
+  const stepDur = TRACKS[musicTrack].stepDur;
   while (nextStepTime < ctx.currentTime + 0.12) {
     playStep(musicTrack, musicStep, nextStepTime, stepDur);
     musicStep = (musicStep + 1) % 16;

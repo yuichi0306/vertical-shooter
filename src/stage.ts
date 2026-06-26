@@ -27,6 +27,9 @@ export type BossKind = "gorilla" | "machineGorilla";
 //   "sky"   … 地球の空（水色・白い雲・海・緑の島）
 export type StageTheme = "night" | "sky";
 
+// BGMの種類（実体は audio.ts。ここでは型だけ借りる）
+import type { MusicTrack } from "./audio";
+
 // 1回の出現イベント
 //   time … ステージ開始からの秒数
 //   kind … 敵の種類
@@ -37,13 +40,16 @@ export type SpawnEvent = { time: number; kind: EnemyKind; x: number };
 //   name     … 画面に出すステージ名
 //   theme    … 背景テーマ
 //   boss     … 最後に出るボスの種類
-//   duration … 道中の長さ（秒）。これを過ぎ、雑魚を片付けたらボス登場
-//   timeline … 敵の出現データ（time の昇順に並べる）
+//   duration    … 道中の長さ（秒）。これを過ぎ、雑魚を片付けたらボス登場
+//   normalMusic … 道中のBGM、bossMusic … ボス戦のBGM（曲は audio.ts）
+//   timeline    … 敵の出現データ（time の昇順に並べる）
 export type Stage = {
   name: string;
   theme: StageTheme;
   boss: BossKind;
   duration: number;
+  normalMusic: MusicTrack;
+  bossMusic: MusicTrack;
   timeline: SpawnEvent[];
 };
 
@@ -55,6 +61,8 @@ const STAGE1: Stage = {
   theme: "night",
   boss: "gorilla",
   duration: 16.0,
+  normalMusic: "normal",
+  bossMusic: "boss",
   timeline: [
     // 序盤：ゆっくりなカタツムリで肩慣らし
     { time: 1.0, kind: "snail", x: 0.5 },
@@ -96,6 +104,8 @@ const STAGE2: Stage = {
   theme: "sky",
   boss: "machineGorilla",
   duration: 18.0,
+  normalMusic: "normal2", // 颯爽とした疾走感のBGM
+  bossMusic: "boss2", // 颯爽・勇ましいボスBGM
   timeline: [
     // 序盤：蛇と蜘蛛で
     { time: 1.0, kind: "snake", x: 0.3 },
