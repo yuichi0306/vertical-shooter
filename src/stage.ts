@@ -7,9 +7,10 @@
 // ===================================================================
 
 // 敵の種類
-//   "straight" … まっすぐ下りてくる
-//   "zigzag"   … 左右に揺れながら下りてくる
-export type EnemyKind = "straight" | "zigzag";
+//   "snail"  … カタツムリ。ほとんど動かず、ゆっくり這うように下りてくる
+//   "snake"  … 蛇。左右にくねくね横移動しながら下りてくる
+//   "spider" … 蜘蛛。糸で上下にビヨンと伸び縮みしながら（縦に動いて）下りてくる
+export type EnemyKind = "snail" | "snake" | "spider";
 
 // 1回の出現イベント
 //   time … ステージ開始からの秒数
@@ -19,30 +20,35 @@ export type SpawnEvent = { time: number; kind: EnemyKind; x: number };
 
 // ステージのタイムライン（time の昇順に並べておく）
 export const STAGE_TIMELINE: SpawnEvent[] = [
-  // 序盤：まっすぐな敵で肩慣らし
-  { time: 1.0, kind: "straight", x: 0.5 },
-  { time: 1.8, kind: "straight", x: 0.35 },
-  { time: 1.8, kind: "straight", x: 0.65 },
-  { time: 3.0, kind: "straight", x: 0.2 },
-  { time: 3.4, kind: "straight", x: 0.4 },
-  { time: 3.8, kind: "straight", x: 0.6 },
-  { time: 4.2, kind: "straight", x: 0.8 },
+  // 序盤：ゆっくりなカタツムリで肩慣らし
+  { time: 1.0, kind: "snail", x: 0.5 },
+  { time: 1.8, kind: "snail", x: 0.35 },
+  { time: 1.8, kind: "snail", x: 0.65 },
+  { time: 3.0, kind: "snail", x: 0.2 },
+  { time: 3.4, kind: "snail", x: 0.4 },
+  { time: 3.8, kind: "snail", x: 0.6 },
+  { time: 4.2, kind: "snail", x: 0.8 },
 
-  // 中盤：左右に揺れる敵を混ぜる
-  { time: 6.0, kind: "zigzag", x: 0.25 },
-  { time: 6.0, kind: "zigzag", x: 0.75 },
-  { time: 8.0, kind: "zigzag", x: 0.5 },
-  { time: 9.0, kind: "straight", x: 0.15 },
-  { time: 9.0, kind: "straight", x: 0.85 },
+  // 中盤：横にくねる蛇を混ぜる
+  { time: 6.0, kind: "snake", x: 0.25 },
+  { time: 6.0, kind: "snake", x: 0.75 },
+  { time: 8.0, kind: "snake", x: 0.5 },
+  { time: 9.0, kind: "snail", x: 0.15 },
+  { time: 9.0, kind: "snail", x: 0.85 },
 
-  // 終盤：数を増やして山場を作る
-  { time: 11.0, kind: "zigzag", x: 0.2 },
-  { time: 11.4, kind: "zigzag", x: 0.4 },
-  { time: 11.8, kind: "zigzag", x: 0.6 },
-  { time: 12.2, kind: "zigzag", x: 0.8 },
-  { time: 13.5, kind: "straight", x: 0.5 },
-  { time: 13.5, kind: "straight", x: 0.3 },
-  { time: 13.5, kind: "straight", x: 0.7 },
+  // 縦に動く蜘蛛が登場
+  { time: 10.5, kind: "spider", x: 0.35 },
+  { time: 10.5, kind: "spider", x: 0.65 },
+
+  // 終盤：3種をまぜて山場を作る
+  { time: 11.0, kind: "snake", x: 0.2 },
+  { time: 11.4, kind: "spider", x: 0.5 },
+  { time: 11.8, kind: "snake", x: 0.8 },
+  { time: 12.2, kind: "spider", x: 0.4 },
+  { time: 12.2, kind: "spider", x: 0.6 },
+  { time: 13.5, kind: "snail", x: 0.3 },
+  { time: 13.5, kind: "snake", x: 0.5 },
+  { time: 13.5, kind: "spider", x: 0.7 },
 ];
 
 // このステージの道中の長さ（秒）。これを過ぎたら道中終了。

@@ -192,6 +192,7 @@ type Boss = {
   dir: number; // 左右移動の向き（+1 か -1）
   fireTimer: number; // 次の攻撃までの残り秒
   patternIndex: number; // 次に使う攻撃パターン番号
+  walk: number; // 歩行アニメの位相（増えるほど腕足が振れる）
 };
 let boss: Boss | null = null;
 let bossSpawned = false; // このプレイで既にボスを出したか
@@ -200,10 +201,20 @@ let bossSpawned = false; // このプレイで既にボスを出したか
 // 敵
 // -------------------------------------------------------------------
 const ENEMY_RADIUS = 16; // 見た目／当たり判定の半径
-const ENEMY_SPEED = 110; // 下りてくる速さ（px/秒）
+const ENEMY_SPEED = 110; // 下りてくる速さ（px/秒）。蛇の降下に使う
 const ENEMY_HP = 1; // 倒すのに必要な被弾数
-const ZIGZAG_AMPLITUDE = 70; // 「揺れる敵」が左右に動く幅（px）
-const ZIGZAG_FREQ = 1.8; // 「揺れる敵」の揺れの速さ
+const SNAIL_SPEED = 45; // カタツムリ：ゆっくり下りる速さ（px/秒）
+const SNAKE_AMPLITUDE = 70; // 蛇：左右にくねる幅（px）
+const SNAKE_FREQ = 1.8; // 蛇：くねりの速さ
+const SPIDER_SPEED = 130; // 蜘蛛：上下動の基準速さ（px/秒）
+const SPIDER_FREQ = 3.0; // 蜘蛛：糸で伸び縮みする速さ
+
+// 種類ごとの爆発の色（撃破エフェクト用）
+const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
+  snail: "#e8c98f", // カタツムリ＝クリーム色
+  snake: "#6cc456", // 蛇＝緑
+  spider: "#d2453f", // 蜘蛛＝赤
+};
 
 // kind … 敵の種類、baseX … 揺れの基準になる横位置、age … 出現からの経過秒
 type Enemy = {
@@ -254,6 +265,7 @@ function spawnBoss(): void {
     dir: 1,
     fireTimer: BOSS_FIRE_INTERVAL,
     patternIndex: 0,
+    walk: 0,
   };
   bossSpawned = true;
 }
@@ -451,13 +463,20 @@ function update(dt: number): void {
     nextEventIndex += 1;
   }
 
-  // --- 敵の移動 ---
+  // --- 敵の移動（種類ごとに動きが違う）---
   for (const e of enemies) {
     e.age += dt;
-    e.y += ENEMY_SPEED * dt;
-    if (e.kind === "zigzag") {
-      // 基準位置を中心に、サイン波で左右に揺らす
-      e.x = e.baseX + Math.sin(e.age * ZIGZAG_FREQ) * ZIGZAG_AMPLITUDE;
+    if (e.kind === "snail") {
+      // カタツムリ：ほとんど動かず、ゆっくり下りるだけ
+      e.y += SNAIL_SPEED * dt;
+    } else if (e.kind === "snake") {
+      // 蛇：基準位置を中心に、サイン波で左右にくねりながら下りる
+      e.y += ENEMY_SPEED * dt;
+      e.x = e.baseX + Math.sin(e.age * SNAKE_FREQ) * SNAKE_AMPLITUDE;
+    } else {
+      // 蜘蛛：糸で上下に伸び縮みしながら（縦に動いて）下りる。
+      // 速さをサイン波で増減させ、時には少し上に戻る＝縦のビヨンビヨン感を出す
+      e.y += SPIDER_SPEED * (0.6 + Math.sin(e.age * SPIDER_FREQ)) * dt;
     }
   }
 
@@ -473,7 +492,7 @@ function update(dt: number): void {
           enemies.splice(ei, 1); // 敵を倒した
           defeated += 1;
           score += SCORE_ENEMY;
-          spawnExplosion(e.x, e.y, e.kind === "zigzag" ? "#ff9f43" : "#ff5c7a", 14);
+          spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 14);
           playExplosion();
           // 一定確率でパワーアップアイテムを落とす
           if (Math.random() < ITEM_DROP_RATE) {
@@ -521,6 +540,7 @@ function update(dt: number): void {
 
   // --- ボスの行動 ---
   if (boss) {
+    boss.walk += dt * 9; // 移動中ずっと腕と足を振り続ける
     if (boss.phase === "enter") {
       // 所定の高さまで下りてくる
       boss.y += BOSS_ENTER_SPEED * dt;
@@ -739,6 +759,293 @@ function drawCabbage(cx: number, cy: number): void {
 }
 
 // -------------------------------------------------------------------
+// 敵その1：カタツムリ（動かない敵）。(cx, cy) が中心。
+// -------------------------------------------------------------------
+function drawSnail(cx: number, cy: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // 這う体（クリーム色）
+  ctx.fillStyle = "#e8c98f";
+  ctx.beginPath();
+  ctx.ellipse(-1, 9, 15, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 頭（右前方）
+  ctx.beginPath();
+  ctx.ellipse(11, 3, 6, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 殻（うずまき）
+  ctx.fillStyle = "#d98a3d";
+  ctx.beginPath();
+  ctx.arc(-3, -1, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#8a4d1a";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // うずまきの線
+  ctx.beginPath();
+  for (let a = 0; a < Math.PI * 3; a += 0.2) {
+    const r = 9.5 - a * 0.95;
+    if (r < 1) break;
+    const px = -3 + Math.cos(a) * r;
+    const py = -1 + Math.sin(a) * r;
+    if (a === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+
+  // 触角2本＋先っぽの目
+  ctx.strokeStyle = "#e8c98f";
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(13, -1);
+  ctx.lineTo(16, -8);
+  ctx.moveTo(10, -2);
+  ctx.lineTo(11, -9);
+  ctx.stroke();
+  ctx.fillStyle = "#1c1208";
+  ctx.beginPath();
+  ctx.arc(16, -8, 1.4, 0, Math.PI * 2);
+  ctx.arc(11, -9, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// 敵その2：蛇（横に動く敵）。(cx, cy) が中心。
+// -------------------------------------------------------------------
+function drawSnake(cx: number, cy: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // くねった胴体（S字）
+  ctx.strokeStyle = "#5fb84a";
+  ctx.lineWidth = 8;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(-13, 11);
+  ctx.quadraticCurveTo(3, 7, -3, -1);
+  ctx.quadraticCurveTo(-8, -8, 7, -12);
+  ctx.stroke();
+  // 背中の模様
+  ctx.strokeStyle = "#3e8a30";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-9, 10);
+  ctx.lineTo(-6, 9);
+  ctx.moveTo(-1, 3);
+  ctx.lineTo(2, 4);
+  ctx.moveTo(-2, -6);
+  ctx.lineTo(1, -5);
+  ctx.stroke();
+
+  // 頭
+  ctx.fillStyle = "#6cc456";
+  ctx.beginPath();
+  ctx.ellipse(8, -13, 6.5, 5, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+  // 目
+  ctx.fillStyle = "#111";
+  ctx.beginPath();
+  ctx.arc(10, -15, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+  // 舌（赤いちょろ）
+  ctx.strokeStyle = "#e0506a";
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(13, -14);
+  ctx.lineTo(18, -15);
+  ctx.moveTo(18, -15);
+  ctx.lineTo(20, -16.5);
+  ctx.moveTo(18, -15);
+  ctx.lineTo(20, -13.5);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// 敵その3：蜘蛛（縦に動く敵）。(cx, cy) が中心。上に糸が伸びる。
+// -------------------------------------------------------------------
+function drawSpider(cx: number, cy: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // 上に伸びる糸
+  ctx.strokeStyle = "rgba(210, 210, 220, 0.5)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, -13);
+  ctx.lineTo(0, -42);
+  ctx.stroke();
+
+  // 8本の脚（左右4本ずつ、ひざで折れる）
+  ctx.strokeStyle = "#2b2b33";
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 4; i++) {
+      const ly = -6 + i * 4.5;
+      ctx.beginPath();
+      ctx.moveTo(side * 4, ly);
+      ctx.lineTo(side * 11, ly - 3);
+      ctx.lineTo(side * 16, ly + 4);
+      ctx.stroke();
+    }
+  }
+
+  // おしり（大きい胴）
+  ctx.fillStyle = "#3a3a44";
+  ctx.beginPath();
+  ctx.ellipse(0, 5, 8, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 頭胸部
+  ctx.fillStyle = "#2b2b33";
+  ctx.beginPath();
+  ctx.arc(0, -5, 6, 0, Math.PI * 2);
+  ctx.fill();
+  // 背中の赤い砂時計模様
+  ctx.fillStyle = "#d2453f";
+  ctx.beginPath();
+  ctx.moveTo(0, 4);
+  ctx.lineTo(-3, 1);
+  ctx.lineTo(3, 1);
+  ctx.closePath();
+  ctx.moveTo(0, 4);
+  ctx.lineTo(-3, 8);
+  ctx.lineTo(3, 8);
+  ctx.closePath();
+  ctx.fill();
+  // 目（白い点）
+  ctx.fillStyle = "#e8e8e8";
+  ctx.beginPath();
+  ctx.arc(-2, -6, 1, 0, Math.PI * 2);
+  ctx.arc(2, -6, 1, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// 敵を種類に応じた姿で描く
+function drawEnemy(e: Enemy): void {
+  if (e.kind === "snail") drawSnail(e.x, e.y);
+  else if (e.kind === "snake") drawSnake(e.x, e.y);
+  else drawSpider(e.x, e.y);
+}
+
+// -------------------------------------------------------------------
+// ボス：ゴリラ。(cx, cy) が中心。walk が大きいほど腕と足が振れる。
+// -------------------------------------------------------------------
+function drawGorillaBoss(cx: number, cy: number, walk: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const swing = Math.sin(walk); // -1〜+1：腕と足の振り
+  const bob = Math.sin(walk * 2) * 2; // 上下に小さく弾む
+  ctx.translate(0, bob);
+
+  const FUR = "#4a4a55"; // 体毛（明るめ）
+  const FUR_DARK = "#34343d"; // 体毛（暗め）
+  const SKIN = "#211f26"; // 顔・手足の肌
+
+  // --- 足（左右で逆に踏み出す）---
+  ctx.strokeStyle = FUR_DARK;
+  ctx.lineWidth = 14;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-11, 16);
+  ctx.lineTo(-13 + swing * 6, 34);
+  ctx.moveTo(11, 16);
+  ctx.lineTo(13 - swing * 6, 34);
+  ctx.stroke();
+  // 足の甲
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.ellipse(-15 + swing * 6, 36, 8, 4.5, 0, 0, Math.PI * 2);
+  ctx.ellipse(15 - swing * 6, 36, 8, 4.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 腕（足と逆向きに振る。長くてナックル歩き）---
+  ctx.strokeStyle = FUR;
+  ctx.lineWidth = 15;
+  ctx.beginPath();
+  ctx.moveTo(-18, -12);
+  ctx.lineTo(-30 - swing * 6, 20);
+  ctx.moveTo(18, -12);
+  ctx.lineTo(30 + swing * 6, 20);
+  ctx.stroke();
+  // こぶし
+  ctx.fillStyle = FUR_DARK;
+  ctx.beginPath();
+  ctx.arc(-30 - swing * 6, 23, 9, 0, Math.PI * 2);
+  ctx.arc(30 + swing * 6, 23, 9, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 胴体 ---
+  ctx.fillStyle = FUR;
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 22, 25, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 明るいおなか
+  ctx.fillStyle = "#5d5d6a";
+  ctx.beginPath();
+  ctx.ellipse(0, 6, 13, 17, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 頭 ---
+  // 耳
+  ctx.fillStyle = FUR;
+  ctx.beginPath();
+  ctx.arc(-17, -25, 5, 0, Math.PI * 2);
+  ctx.arc(17, -25, 5, 0, Math.PI * 2);
+  ctx.fill();
+  // 頭本体
+  ctx.beginPath();
+  ctx.ellipse(0, -24, 18, 16, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 顔（肌）
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.ellipse(0, -20, 12, 13, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 出っぱった眉
+  ctx.fillStyle = "#15131a";
+  ctx.beginPath();
+  ctx.ellipse(0, -27, 12, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 目
+  ctx.fillStyle = "#f3d44a";
+  ctx.beginPath();
+  ctx.arc(-5, -24, 2.4, 0, Math.PI * 2);
+  ctx.arc(5, -24, 2.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#15131a";
+  ctx.beginPath();
+  ctx.arc(-5, -24, 1.1, 0, Math.PI * 2);
+  ctx.arc(5, -24, 1.1, 0, Math.PI * 2);
+  ctx.fill();
+  // 鼻の穴
+  ctx.beginPath();
+  ctx.arc(-3, -15, 1.3, 0, Math.PI * 2);
+  ctx.arc(3, -15, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+  // 口（への字）
+  ctx.strokeStyle = "#15131a";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-5, -10);
+  ctx.quadraticCurveTo(0, -8, 5, -10);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
 // render: 今の状態を画面に描く
 // -------------------------------------------------------------------
 function render(): void {
@@ -769,15 +1076,9 @@ function render(): void {
     return; // タイトル中はここで描画終了
   }
 
-  // 敵（種類で色分け：まっすぐ=赤、揺れる=オレンジ）
+  // 敵（種類ごとの姿：カタツムリ／蛇／蜘蛛）
   for (const e of enemies) {
-    ctx.fillStyle = e.kind === "zigzag" ? "#ff9f43" : "#ff5c7a";
-    ctx.fillRect(
-      e.x - ENEMY_RADIUS,
-      e.y - ENEMY_RADIUS,
-      ENEMY_RADIUS * 2,
-      ENEMY_RADIUS * 2,
-    );
+    drawEnemy(e);
   }
 
   // パワーアップアイテム（キャベツ）
@@ -785,15 +1086,9 @@ function render(): void {
     drawCabbage(it.x, it.y);
   }
 
-  // ボス（紫の大きな四角）＋ HPバー
+  // ボス（腕と足が動くゴリラ）＋ HPバー
   if (boss) {
-    ctx.fillStyle = "#b15cff";
-    ctx.fillRect(
-      boss.x - BOSS_RADIUS,
-      boss.y - BOSS_RADIUS,
-      BOSS_RADIUS * 2,
-      BOSS_RADIUS * 2,
-    );
+    drawGorillaBoss(boss.x, boss.y, boss.walk);
     // 画面上部のHPバー
     const barW = WIDTH - 40;
     const ratio = Math.max(0, boss.hp / BOSS_MAX_HP);
