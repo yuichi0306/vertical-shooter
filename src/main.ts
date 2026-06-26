@@ -80,6 +80,7 @@ const player = {
   lives: START_LIVES, // 残機
   invincible: 0, // 残りの無敵時間（秒）。0より大きい間は無敵
   power: 1, // ショットの強化段階（1〜POWER_MAX）
+  lean: 0, // 首の傾き（-1=左 / 0=正面 / +1=右）。移動方向へなめらかに追従
 };
 
 // ゲーム全体の状態。
@@ -312,6 +313,7 @@ function resetGame(): void {
   player.lives = START_LIVES;
   player.invincible = 0;
   player.power = 1;
+  player.lean = 0;
   bullets.length = 0;
   enemies.length = 0;
   items.length = 0;
@@ -409,6 +411,10 @@ function update(dt: number): void {
 
   player.x += dx * PLAYER_SPEED * dt;
   player.y += dy * PLAYER_SPEED * dt;
+
+  // 首の傾きを、今の左右入力（-1/0/+1）へなめらかに近づける
+  const leanTarget = Math.sign(dx);
+  player.lean += (leanTarget - player.lean) * Math.min(1, dt * 12);
 
   // 画面の外に出ないように位置を制限する
   player.x = Math.max(PLAYER_RADIUS, Math.min(WIDTH - PLAYER_RADIUS, player.x));
@@ -583,6 +589,104 @@ function update(dt: number): void {
 }
 
 // -------------------------------------------------------------------
+// 自機を「頭がキリン・体が亀」の姿で描く。(cx, cy) が中心。上が前方。
+// -------------------------------------------------------------------
+function drawPlayerGiraffeTurtle(cx: number, cy: number, lean = 0): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // --- 亀の体 ---
+  // 4枚のひれ（甲羅の四隅から斜めに）
+  ctx.fillStyle = "#2e7d43";
+  const flippers: [number, number, number][] = [
+    [-11, 1, -0.7], // 左前
+    [11, 1, 0.7], // 右前
+    [-10, 11, 0.5], // 左後
+    [10, 11, -0.5], // 右後
+  ];
+  for (const [fx, fy, rot] of flippers) {
+    ctx.beginPath();
+    ctx.ellipse(fx, fy, 4, 2.5, rot, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // しっぽ（後ろ＝下）
+  ctx.beginPath();
+  ctx.moveTo(-3, 13);
+  ctx.lineTo(3, 13);
+  ctx.lineTo(0, 19);
+  ctx.closePath();
+  ctx.fill();
+
+  // 甲羅本体（緑のドーム）
+  ctx.fillStyle = "#3fae5a";
+  ctx.beginPath();
+  ctx.ellipse(0, 6, 12, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 甲羅のフチを少し濃く
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#2e7d43";
+  ctx.stroke();
+  // 甲羅の模様（六角っぽい仕切り線）
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, -2);
+  ctx.lineTo(0, 14);
+  ctx.moveTo(-9, 6);
+  ctx.lineTo(-2, 6);
+  ctx.moveTo(2, 6);
+  ctx.lineTo(9, 6);
+  ctx.stroke();
+
+  // --- キリンの首と頭（前方＝上へ伸びる。移動方向へ傾く） ---
+  // 首の付け根(0,1)を軸に、leanの分だけ左右へ傾ける（最大±0.5ラジアン）
+  ctx.translate(0, 1);
+  ctx.rotate(lean * 0.5);
+  ctx.translate(0, -1);
+  // 首
+  ctx.fillStyle = "#e8b14c";
+  ctx.beginPath();
+  ctx.moveTo(-3, 1);
+  ctx.lineTo(3, 1);
+  ctx.lineTo(5, -18);
+  ctx.lineTo(1, -20);
+  ctx.closePath();
+  ctx.fill();
+  // 首の模様（キリン柄の斑点）
+  ctx.fillStyle = "#b9772b";
+  ctx.beginPath();
+  ctx.arc(-0.5, -4, 1.4, 0, Math.PI * 2);
+  ctx.arc(2, -11, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 頭（少し前傾）
+  ctx.fillStyle = "#e8b14c";
+  ctx.beginPath();
+  ctx.ellipse(4, -22, 5, 3.4, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  // 角（ツノ）2本＋先っぽの玉
+  ctx.strokeStyle = "#b9772b";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(2, -24);
+  ctx.lineTo(1, -28);
+  ctx.moveTo(5, -25);
+  ctx.lineTo(5, -29);
+  ctx.stroke();
+  ctx.fillStyle = "#b9772b";
+  ctx.beginPath();
+  ctx.arc(1, -28.5, 1.3, 0, Math.PI * 2);
+  ctx.arc(5, -29.5, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+  // 目
+  ctx.fillStyle = "#1c1208";
+  ctx.beginPath();
+  ctx.arc(5, -23, 1.1, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
 // render: 今の状態を画面に描く
 // -------------------------------------------------------------------
 function render(): void {
@@ -675,18 +779,12 @@ function render(): void {
     ctx.fillRect(b.x - 2, b.y - 8, 4, 12);
   }
 
-  // 自機（上向きの三角形）。無敵中だけ点滅させ、それ以外は常に表示。
-  // ゲームオーバー中は自機を描かない。
+  // 自機（頭がキリン・体が亀のふしぎな生きもの。上＝進行方向）。
+  // 無敵中だけ点滅させ、それ以外は常に表示。ゲームオーバー中は描かない。
   const blinkVisible =
     player.invincible <= 0 || Math.floor(player.invincible * 10) % 2 === 0;
   if (gameState !== "gameover" && blinkVisible) {
-    ctx.fillStyle = "#5cff9d";
-    ctx.beginPath();
-    ctx.moveTo(player.x, player.y - 14);
-    ctx.lineTo(player.x - 11, player.y + 12);
-    ctx.lineTo(player.x + 11, player.y + 12);
-    ctx.closePath();
-    ctx.fill();
+    drawPlayerGiraffeTurtle(player.x, player.y, player.lean);
   }
 
   // プレイ中の情報表示（スコア・残機・パワー）
