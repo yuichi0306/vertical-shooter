@@ -1,8 +1,10 @@
 // ===================================================================
-// ステップ3: 敵の出現と、円どうしの当たり判定
-//   - 敵が上から下りてくる（今は一定間隔の仮出現）
-//   - 自分の弾が敵に当たると、両方消える
+// ステップ4: 敵の出現をデータ駆動タイムラインに置き換え
+//   - 出現の内容は src/stage.ts のデータで管理
+//   - 敵の種類（まっすぐ / 左右に揺れる）に対応
 // ===================================================================
+
+import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
 
 // ゲーム内部の解像度（座標はすべてこのサイズを基準に書く）
 const WIDTH = 480;
@@ -88,11 +90,29 @@ const bullets: Bullet[] = [];
 const ENEMY_RADIUS = 16; // 見た目／当たり判定の半径
 const ENEMY_SPEED = 110; // 下りてくる速さ（px/秒）
 const ENEMY_HP = 1; // 倒すのに必要な被弾数
-const SPAWN_INTERVAL = 0.8; // 仮：何秒ごとに敵を1体出すか（ステップ4で置き換え）
+const ZIGZAG_AMPLITUDE = 70; // 「揺れる敵」が左右に動く幅（px）
+const ZIGZAG_FREQ = 1.8; // 「揺れる敵」の揺れの速さ
 
-type Enemy = { x: number; y: number; hp: number };
+// kind … 敵の種類、baseX … 揺れの基準になる横位置、age … 出現からの経過秒
+type Enemy = {
+  x: number;
+  y: number;
+  hp: number;
+  kind: EnemyKind;
+  baseX: number;
+  age: number;
+};
 const enemies: Enemy[] = [];
-let spawnTimer = 0;
+
+// タイムライン進行用：ステージ開始からの経過秒と、次に処理するイベント番号
+let stageTime = 0;
+let nextEventIndex = 0;
+
+// 敵を1体作る
+function spawnEnemy(kind: EnemyKind, xRatio: number): void {
+  const x = xRatio * WIDTH;
+  enemies.push({ x, y: -ENEMY_RADIUS, hp: ENEMY_HP, kind, baseX: x, age: 0 });
+}
 
 // 倒した数（スコアの土台。正式なスコア表示はステップ8で整える）
 let defeated = 0;
@@ -170,17 +190,26 @@ function update(dt: number): void {
     if (bullets[i].y < -10) bullets.splice(i, 1);
   }
 
-  // --- 敵の出現（仮：一定間隔。ステップ4でデータ駆動に置き換え）---
-  spawnTimer -= dt;
-  if (spawnTimer <= 0) {
-    spawnTimer = SPAWN_INTERVAL;
-    const x = ENEMY_RADIUS + Math.random() * (WIDTH - ENEMY_RADIUS * 2);
-    enemies.push({ x, y: -ENEMY_RADIUS, hp: ENEMY_HP });
+  // --- 敵の出現（データ駆動タイムライン）---
+  stageTime += dt;
+  // 「今の時刻」に達したイベントを順番に処理する
+  while (
+    nextEventIndex < STAGE_TIMELINE.length &&
+    STAGE_TIMELINE[nextEventIndex].time <= stageTime
+  ) {
+    const ev = STAGE_TIMELINE[nextEventIndex];
+    spawnEnemy(ev.kind, ev.x);
+    nextEventIndex += 1;
   }
 
   // --- 敵の移動 ---
   for (const e of enemies) {
+    e.age += dt;
     e.y += ENEMY_SPEED * dt;
+    if (e.kind === "zigzag") {
+      // 基準位置を中心に、サイン波で左右に揺らす
+      e.x = e.baseX + Math.sin(e.age * ZIGZAG_FREQ) * ZIGZAG_AMPLITUDE;
+    }
   }
 
   // --- 当たり判定：自分の弾 × 敵 ---
@@ -220,9 +249,9 @@ function render(): void {
     ctx.fillRect(s.x, s.y, s.size, s.size);
   }
 
-  // 敵（赤い四角）
-  ctx.fillStyle = "#ff5c7a";
+  // 敵（種類で色分け：まっすぐ=赤、揺れる=オレンジ）
   for (const e of enemies) {
+    ctx.fillStyle = e.kind === "zigzag" ? "#ff9f43" : "#ff5c7a";
     ctx.fillRect(
       e.x - ENEMY_RADIUS,
       e.y - ENEMY_RADIUS,
@@ -252,6 +281,16 @@ function render(): void {
   ctx.fillText(`FPS: ${fps}`, 10, 22);
   ctx.fillText(`Defeated: ${defeated}`, 10, 42);
   ctx.fillText("Move: Arrow/WASD   Shot: Z/Space", 10, 62);
+
+  // 道中が終わり、敵も全部いなくなったら表示（ボスはステップ7で接続）
+  if (stageTime >= STAGE_DURATION && enemies.length === 0) {
+    ctx.textAlign = "center";
+    ctx.font = "28px monospace";
+    ctx.fillText("STAGE CLEAR (道中)", WIDTH / 2, HEIGHT / 2);
+    ctx.font = "14px monospace";
+    ctx.fillText("ボスはステップ7で登場します", WIDTH / 2, HEIGHT / 2 + 28);
+    ctx.textAlign = "left";
+  }
 }
 
 // -------------------------------------------------------------------
