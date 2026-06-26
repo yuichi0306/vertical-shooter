@@ -142,6 +142,13 @@ const player = {
 let bombFlash = 0; // 0より大きい間、画面に閃光を出す
 let bombKeyWasDown = false; // 前フレームでボムキーが押されていたか（押した瞬間だけ反応させる）
 
+// やられた時の演出（画面の揺れ・ヒットストップ）
+const SHAKE_TIME = 0.35; // 画面が揺れる時間（秒）
+const SHAKE_MAG = 7; // 揺れの大きさ（px）。だんだん小さくなる
+const HITSTOP_TIME = 0.07; // 被弾の瞬間、動きを止める時間（秒）
+let shakeTime = 0; // 残りの揺れ時間（秒）
+let hitStop = 0; // 残りのヒットストップ時間（秒）。0より大きい間は動きが止まる
+
 // ゲーム全体の状態。
 type GameState = "title" | "playing" | "gameover" | "clear";
 let gameState: GameState = "title"; // 起動時はタイトル画面から
@@ -380,11 +387,15 @@ function damagePlayer(): void {
   player.power = Math.max(1, player.power - 1); // 被弾で1段階ダウン
   spawnExplosion(player.x, player.y, "#5cff9d", 24);
   playHit();
+  // 被弾の手応え：画面を揺らし、一瞬だけ動きを止める
+  shakeTime = SHAKE_TIME;
+  hitStop = HITSTOP_TIME;
   if (player.lives <= 0) {
     gameState = "gameover";
     resultLock = 0.8; // 誤リスタート防止
     saveHighScoreIfNeeded();
     setMusic(null); // ゲームオーバーでBGMを止める
+    shakeTime = SHAKE_TIME * 1.8; // 最後の1機は大きく揺らす
   } else {
     player.invincible = INVINCIBLE_TIME; // しばらく無敵で復活
   }
@@ -439,6 +450,8 @@ function resetGame(): void {
   player.bombs = START_BOMBS;
   bombFlash = 0;
   bombKeyWasDown = false;
+  shakeTime = 0;
+  hitStop = 0;
   bullets.length = 0;
   enemies.length = 0;
   items.length = 0;
@@ -494,8 +507,9 @@ function update(dt: number): void {
   updateLayer(clouds, dt, 40);
   updateLayer(nearGround, dt, 70);
 
-  // ボムの閃光を時間で消していく（どの状態でも進める）
+  // ボムの閃光・画面の揺れを時間で弱めていく（どの状態でも進める）
   if (bombFlash > 0) bombFlash -= dt;
+  if (shakeTime > 0) shakeTime -= dt;
 
   // --- 爆発の破片（どの状態でも動かし続ける）---
   for (let i = particles.length - 1; i >= 0; i--) {
@@ -1287,6 +1301,15 @@ function render(): void {
     return; // タイトル中はここで描画終了
   }
 
+  // ここから「ゲーム世界」の描画。被弾の揺れがある間は少しずらして描く。
+  // 背景は揺らさず、ここ以降（敵・自機・弾など）だけを揺らす。
+  ctx.save();
+  if (shakeTime > 0) {
+    const k = shakeTime / SHAKE_TIME; // 1 → 0（だんだん収まる）
+    const m = SHAKE_MAG * k;
+    ctx.translate((Math.random() * 2 - 1) * m, (Math.random() * 2 - 1) * m);
+  }
+
   // 敵（種類ごとの姿：カタツムリ／蛇／蜘蛛）
   for (const e of enemies) {
     drawEnemy(e);
@@ -1355,6 +1378,9 @@ function render(): void {
     ctx.restore();
   }
 
+  // ここでゲーム世界の揺れを終了（以降のHUDや決着表示は揺らさない）
+  ctx.restore();
+
   // プレイ中の情報表示（スコア・残機・パワー）
   ctx.fillStyle = "#ffffff";
   ctx.font = "14px monospace";
@@ -1407,6 +1433,14 @@ function frame(now: number): void {
   let elapsed = (now - lastTime) / 1000;
   lastTime = now;
   if (elapsed > 0.25) elapsed = 0.25;
+
+  // ヒットストップ中はゲームの進行を止め、描画だけ続ける（被弾の「ため」）
+  if (hitStop > 0) {
+    hitStop -= elapsed;
+    render();
+    requestAnimationFrame(frame);
+    return;
+  }
 
   accumulator += elapsed;
   while (accumulator >= STEP) {
