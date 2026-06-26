@@ -5,7 +5,7 @@
 // ===================================================================
 
 import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
-import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion } from "./audio";
+import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion, setMusic } from "./audio";
 
 // ゲーム内部の解像度（座標はすべてこのサイズを基準に書く）
 const WIDTH = 480;
@@ -183,6 +183,11 @@ const BOSS_SWAY_SPEED = 60; // 戦闘中に左右へ動く速さ
 const BOSS_FIRE_INTERVAL = 1.4; // 攻撃と攻撃の間隔（秒）
 const EBULLET_SPEED = 190; // 敵弾の速さ
 
+// 怒りモード：HPがこの割合以下になると攻撃が激しくなる
+const BOSS_ENRAGE_RATIO = 0.5; // 半分以下で発動
+const BOSS_SWAY_SPEED_ENRAGED = 105; // 怒り時の左右移動の速さ
+const BOSS_FIRE_INTERVAL_ENRAGED = 0.75; // 怒り時の攻撃間隔（短い＝激しい）
+
 // phase … "enter"=入場中, "fight"=戦闘中
 type Boss = {
   x: number;
@@ -193,6 +198,7 @@ type Boss = {
   fireTimer: number; // 次の攻撃までの残り秒
   patternIndex: number; // 次に使う攻撃パターン番号
   walk: number; // 歩行アニメの位相（増えるほど腕足が振れる）
+  enraged: boolean; // 怒りモードに入ったか（HP半分以下で true）
 };
 let boss: Boss | null = null;
 let bossSpawned = false; // このプレイで既にボスを出したか
@@ -206,6 +212,7 @@ const ENEMY_HP = 1; // 倒すのに必要な被弾数
 const SNAIL_SPEED = 45; // カタツムリ：ゆっくり下りる速さ（px/秒）
 const SNAKE_AMPLITUDE = 70; // 蛇：左右にくねる幅（px）
 const SNAKE_FREQ = 1.8; // 蛇：くねりの速さ
+const SNAKE_FIRE_INTERVAL = 1.8; // 蛇：弾を撃つ間隔（秒）。蛇だけが撃ってくる
 const SPIDER_SPEED = 130; // 蜘蛛：上下動の基準速さ（px/秒）
 const SPIDER_FREQ = 3.0; // 蜘蛛：糸で伸び縮みする速さ
 
@@ -217,6 +224,7 @@ const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
 };
 
 // kind … 敵の種類、baseX … 揺れの基準になる横位置、age … 出現からの経過秒
+// fireTimer … 次に弾を撃つまでの残り秒（蛇だけが使う）
 type Enemy = {
   x: number;
   y: number;
@@ -224,6 +232,7 @@ type Enemy = {
   kind: EnemyKind;
   baseX: number;
   age: number;
+  fireTimer: number;
 };
 const enemies: Enemy[] = [];
 
@@ -234,7 +243,9 @@ let nextEventIndex = 0;
 // 敵を1体作る
 function spawnEnemy(kind: EnemyKind, xRatio: number): void {
   const x = xRatio * WIDTH;
-  enemies.push({ x, y: -ENEMY_RADIUS, hp: ENEMY_HP, kind, baseX: x, age: 0 });
+  // 蛇の発射タイミングを少しずらして、全部が同時に撃たないようにする
+  const fireTimer = SNAKE_FIRE_INTERVAL * (0.6 + Math.random() * 0.8);
+  enemies.push({ x, y: -ENEMY_RADIUS, hp: ENEMY_HP, kind, baseX: x, age: 0, fireTimer });
 }
 
 // 自機のショットを撃つ。強化段階で弾の数と広がりが変わる。
@@ -266,8 +277,10 @@ function spawnBoss(): void {
     fireTimer: BOSS_FIRE_INTERVAL,
     patternIndex: 0,
     walk: 0,
+    enraged: false,
   };
   bossSpawned = true;
+  setMusic("boss"); // ボス登場でBGMを切り替え
 }
 
 // 敵弾を1発、指定の向き（角度ラジアン）に撃つ
@@ -312,6 +325,7 @@ function damagePlayer(): void {
     gameState = "gameover";
     resultLock = 0.8; // 誤リスタート防止
     saveHighScoreIfNeeded();
+    setMusic(null); // ゲームオーバーでBGMを止める
   } else {
     player.invincible = INVINCIBLE_TIME; // しばらく無敵で復活
   }
@@ -339,6 +353,7 @@ function resetGame(): void {
   score = 0;
   newRecord = false;
   gameState = "playing";
+  setMusic("normal"); // 道中は通常BGM
 }
 
 // 倒した数（スコアの土台。正式なスコア表示はステップ8で整える）
@@ -473,6 +488,13 @@ function update(dt: number): void {
       // 蛇：基準位置を中心に、サイン波で左右にくねりながら下りる
       e.y += ENEMY_SPEED * dt;
       e.x = e.baseX + Math.sin(e.age * SNAKE_FREQ) * SNAKE_AMPLITUDE;
+      // 蛇だけ、画面内にいる間はたまに自機へ弾を撃つ
+      e.fireTimer -= dt;
+      if (e.fireTimer <= 0 && e.y > 0 && e.y < HEIGHT - 80) {
+        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+        fireEnemyBullet(e.x, e.y, angle);
+        e.fireTimer = SNAKE_FIRE_INTERVAL;
+      }
     } else {
       // 蜘蛛：糸で上下に伸び縮みしながら（縦に動いて）下りる。
       // 速さをサイン波で増減させ、時には少し上に戻る＝縦のビヨンビヨン感を出す
@@ -541,6 +563,14 @@ function update(dt: number): void {
   // --- ボスの行動 ---
   if (boss) {
     boss.walk += dt * 9; // 移動中ずっと腕と足を振り続ける
+
+    // HPが半分以下になった瞬間、一度だけ怒りモードに入る
+    if (!boss.enraged && boss.hp <= BOSS_MAX_HP * BOSS_ENRAGE_RATIO) {
+      boss.enraged = true;
+      spawnExplosion(boss.x, boss.y, "#ff3b3b", 30); // 赤い怒りの演出
+      playBossHit();
+    }
+
     if (boss.phase === "enter") {
       // 所定の高さまで下りてくる
       boss.y += BOSS_ENTER_SPEED * dt;
@@ -549,8 +579,12 @@ function update(dt: number): void {
         boss.phase = "fight";
       }
     } else {
+      // 怒りモードなら、左右移動も攻撃も激しくなる
+      const swaySpeed = boss.enraged ? BOSS_SWAY_SPEED_ENRAGED : BOSS_SWAY_SPEED;
+      const fireInterval = boss.enraged ? BOSS_FIRE_INTERVAL_ENRAGED : BOSS_FIRE_INTERVAL;
+
       // 左右に往復しながら、一定間隔で攻撃パターンを撃つ
-      boss.x += boss.dir * BOSS_SWAY_SPEED * dt;
+      boss.x += boss.dir * swaySpeed * dt;
       if (boss.x < BOSS_RADIUS) {
         boss.x = BOSS_RADIUS;
         boss.dir = 1;
@@ -563,7 +597,9 @@ function update(dt: number): void {
       if (boss.fireTimer <= 0) {
         BOSS_PATTERNS[boss.patternIndex](boss);
         boss.patternIndex = (boss.patternIndex + 1) % BOSS_PATTERNS.length;
-        boss.fireTimer = BOSS_FIRE_INTERVAL;
+        // 怒り時は、通常の技に加えて自機を狙う弾も撃つ
+        if (boss.enraged) bossPatternAimed(boss);
+        boss.fireTimer = fireInterval;
       }
     }
 
@@ -581,6 +617,7 @@ function update(dt: number): void {
           gameState = "clear";
           resultLock = 0.8;
           saveHighScoreIfNeeded();
+          setMusic(null); // クリアでBGMを止める
           break;
         }
         // まだ生きていれば、被弾の手応えとして低めの音を鳴らす
@@ -941,12 +978,25 @@ function drawEnemy(e: Enemy): void {
 // -------------------------------------------------------------------
 // ボス：ゴリラ。(cx, cy) が中心。walk が大きいほど腕と足が振れる。
 // -------------------------------------------------------------------
-function drawGorillaBoss(cx: number, cy: number, walk: number): void {
+function drawGorillaBoss(cx: number, cy: number, walk: number, enraged = false): void {
   ctx.save();
   ctx.translate(cx, cy);
 
   const swing = Math.sin(walk); // -1〜+1：腕と足の振り
   const bob = Math.sin(walk * 2) * 2; // 上下に小さく弾む
+
+  // 怒りモードでは赤いオーラをまとう（ドクンと脈打つ）
+  if (enraged) {
+    const pulse = 0.5 + 0.5 * Math.sin(walk * 1.5);
+    ctx.save();
+    ctx.globalAlpha = 0.25 + pulse * 0.25;
+    ctx.fillStyle = "#ff3b3b";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 40 + pulse * 5, 46 + pulse * 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   ctx.translate(0, bob);
 
   const FUR = "#4a4a55"; // 体毛（明るめ）
@@ -1018,8 +1068,8 @@ function drawGorillaBoss(cx: number, cy: number, walk: number): void {
   ctx.beginPath();
   ctx.ellipse(0, -27, 12, 4, 0, 0, Math.PI * 2);
   ctx.fill();
-  // 目
-  ctx.fillStyle = "#f3d44a";
+  // 目（怒り時は赤く光る）
+  ctx.fillStyle = enraged ? "#ff3b3b" : "#f3d44a";
   ctx.beginPath();
   ctx.arc(-5, -24, 2.4, 0, Math.PI * 2);
   ctx.arc(5, -24, 2.4, 0, Math.PI * 2);
@@ -1088,7 +1138,7 @@ function render(): void {
 
   // ボス（腕と足が動くゴリラ）＋ HPバー
   if (boss) {
-    drawGorillaBoss(boss.x, boss.y, boss.walk);
+    drawGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
     // 画面上部のHPバー
     const barW = WIDTH - 40;
     const ratio = Math.max(0, boss.hp / BOSS_MAX_HP);

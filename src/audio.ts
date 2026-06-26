@@ -120,3 +120,116 @@ export function playHit(): void {
   tone(220, 0.3, "sawtooth", 0.18, 60);
   noise(0.3, 0.2);
 }
+
+// ===================================================================
+// BGM（背景音楽）：音声ファイル不要・効果音と同じくその場で生成
+//
+// 短い16ステップのループを「少し先まで予約しながら」鳴らし続けます。
+// 通常BGMとボス戦BGMの2曲を、setMusic() で切り替えられます。
+// ===================================================================
+
+// 音の高さを表す番号（MIDIノート番号）を周波数(Hz)に変換する
+function midiToFreq(m: number): number {
+  return 440 * Math.pow(2, (m - 69) / 12);
+}
+
+// --- 2曲ぶんの楽譜（16ステップ。数字=音の高さ、0=休符）---
+// 通常BGM：明るく軽快（ハ長調）
+const NORMAL_BASS = [36, 0, 48, 0, 41, 0, 53, 0, 43, 0, 55, 0, 45, 0, 57, 0];
+const NORMAL_LEAD = [72, 76, 79, 76, 77, 76, 74, 0, 74, 71, 74, 76, 79, 0, 76, 0];
+// ボス戦BGM：緊迫感のある短調・速め
+const BOSS_BASS = [38, 38, 38, 38, 38, 38, 41, 42, 36, 36, 36, 36, 36, 36, 40, 41];
+const BOSS_LEAD = [69, 0, 68, 69, 72, 0, 69, 0, 67, 0, 65, 67, 69, 0, 68, 0];
+
+// 1ステップの長さ（秒）。ボスのほうが速い＝あおられる感じ
+const STEP_DUR = { normal: 0.21, boss: 0.16 } as const;
+const MUSIC_VOL = 0.35; // BGM全体の音量（効果音より控えめに）
+
+type MusicTrack = "normal" | "boss";
+
+let musicGain: GainNode | null = null; // BGM全体の音量つまみ
+let musicTrack: MusicTrack | null = null; // 今鳴らしている曲（null=無音）
+let musicStep = 0; // 何ステップ目か
+let nextStepTime = 0; // 次のステップを鳴らす予定の時刻
+let schedulerId: number | null = null; // 予約処理のタイマー
+
+// BGM専用の音量つまみを用意する（効果音とは別系統）
+function ensureMusicGain(): void {
+  if (!ctx || musicGain) return;
+  musicGain = ctx.createGain();
+  musicGain.gain.value = 0.0001;
+  musicGain.connect(ctx.destination);
+}
+
+// BGMの音を1つ、指定の時刻に鳴らす（musicGain 経由で音量管理）
+function musicTone(
+  freq: number,
+  start: number,
+  dur: number,
+  type: OscillatorType,
+  vol: number,
+): void {
+  if (!ctx || !musicGain) return;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(vol, start + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  osc.connect(g).connect(musicGain);
+  osc.start(start);
+  osc.stop(start + dur + 0.02);
+}
+
+// 1ステップぶん（ベース＋メロディ）を予約する
+function playStep(track: MusicTrack, step: number, time: number, stepDur: number): void {
+  const bass = track === "normal" ? NORMAL_BASS : BOSS_BASS;
+  const lead = track === "normal" ? NORMAL_LEAD : BOSS_LEAD;
+  if (bass[step]) {
+    musicTone(midiToFreq(bass[step]), time, stepDur * 0.9, track === "boss" ? "sawtooth" : "triangle", 0.15);
+  }
+  if (lead[step]) {
+    musicTone(midiToFreq(lead[step]), time, stepDur * 0.8, "square", 0.1);
+  }
+}
+
+// 少し先（約0.12秒）まで、来たぶんのステップを予約し続ける
+function scheduler(): void {
+  if (!ctx || !musicTrack) return;
+  const stepDur = STEP_DUR[musicTrack];
+  while (nextStepTime < ctx.currentTime + 0.12) {
+    playStep(musicTrack, musicStep, nextStepTime, stepDur);
+    musicStep = (musicStep + 1) % 16;
+    nextStepTime += stepDur;
+  }
+}
+
+// BGMを切り替える。"normal"／"boss"／null（停止）。
+export function setMusic(track: MusicTrack | null): void {
+  if (!ctx) return;
+  ensureMusicGain();
+  if (!musicGain || track === musicTrack) return;
+  musicTrack = track;
+
+  if (track) {
+    // 曲の頭から鳴らし始め、すっと音量を上げる
+    musicStep = 0;
+    nextStepTime = ctx.currentTime + 0.05;
+    musicGain.gain.cancelScheduledValues(ctx.currentTime);
+    musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), ctx.currentTime);
+    musicGain.gain.exponentialRampToValueAtTime(MUSIC_VOL, ctx.currentTime + 0.3);
+    if (schedulerId === null) {
+      schedulerId = window.setInterval(scheduler, 25);
+    }
+  } else {
+    // すっと音量を下げて止める
+    musicGain.gain.cancelScheduledValues(ctx.currentTime);
+    musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), ctx.currentTime);
+    musicGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+    if (schedulerId !== null) {
+      window.clearInterval(schedulerId);
+      schedulerId = null;
+    }
+  }
+}
