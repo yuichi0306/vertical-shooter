@@ -5,7 +5,7 @@
 // ===================================================================
 
 import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
-import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion, setMusic } from "./audio";
+import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion, playBomb, setMusic } from "./audio";
 
 // ゲーム内部の解像度（座標はすべてこのサイズを基準に書く）
 const WIDTH = 480;
@@ -65,6 +65,54 @@ for (let i = 0; i < 80; i++) {
 }
 
 // -------------------------------------------------------------------
+// 背景の装飾レイヤー（遠くの山・雲・近くの地面）
+//   奥行きを出すため、層ごとに流れる速さを変える（パララックス）。
+//   速い層ほど「近く」に見える。
+// -------------------------------------------------------------------
+type Deco = { x: number; y: number; scale: number; speed: number };
+
+// 1つの層をランダムに作る
+function makeLayer(
+  count: number,
+  speedMin: number,
+  speedMax: number,
+  scaleMin: number,
+  scaleMax: number,
+): Deco[] {
+  const arr: Deco[] = [];
+  for (let i = 0; i < count; i++) {
+    arr.push({
+      x: Math.random() * WIDTH,
+      y: Math.random() * HEIGHT,
+      scale: scaleMin + Math.random() * (scaleMax - scaleMin),
+      speed: speedMin + Math.random() * (speedMax - speedMin),
+    });
+  }
+  return arr;
+}
+
+const farHills = makeLayer(6, 10, 18, 0.8, 1.5); // 遠い山（いちばんゆっくり）
+const clouds = makeLayer(7, 24, 42, 0.7, 1.6); // 流れる雲（中くらい）
+const nearGround = makeLayer(5, 60, 95, 1.0, 1.9); // 近い地面（いちばん速い）
+
+// 夜空のグラデーション（上＝濃い闇、下＝少し明るい地平線）。一度だけ作る。
+const skyGradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+skyGradient.addColorStop(0, "#05050f");
+skyGradient.addColorStop(0.7, "#070a18");
+skyGradient.addColorStop(1, "#0d1226");
+
+// 1つの層を下へ流す。画面の下に出たら上へ戻して再利用する。
+function updateLayer(layer: Deco[], dt: number, margin: number): void {
+  for (const d of layer) {
+    d.y += d.speed * dt;
+    if (d.y - margin > HEIGHT) {
+      d.y = -margin;
+      d.x = Math.random() * WIDTH;
+    }
+  }
+}
+
+// -------------------------------------------------------------------
 // 自機
 // -------------------------------------------------------------------
 const PLAYER_SPEED = 260; // 1秒あたりに動くピクセル数
@@ -72,6 +120,12 @@ const PLAYER_RADIUS = 11; // 見た目／画面端で止まるときの半径
 
 const START_LIVES = 3; // 開始時の残機
 const INVINCIBLE_TIME = 2.0; // 被弾後の無敵時間（秒）
+
+// ボム（緊急回避）
+const START_BOMBS = 3; // 開始時のボム数
+const BOMB_INVINCIBLE_TIME = 1.5; // ボム発動中の無敵時間（秒）
+const BOMB_FLASH_TIME = 0.45; // ボムの閃光の表示時間（秒）
+const BOSS_BOMB_DAMAGE = 10; // ボムがボスに与えるダメージ
 
 const player = {
   x: WIDTH / 2,
@@ -81,7 +135,12 @@ const player = {
   invincible: 0, // 残りの無敵時間（秒）。0より大きい間は無敵
   power: 1, // ショットの強化段階（1〜POWER_MAX）
   lean: 0, // 首の傾き（-1=左 / 0=正面 / +1=右）。移動方向へなめらかに追従
+  bombs: START_BOMBS, // 残りのボム数
 };
+
+// ボムの演出・入力管理
+let bombFlash = 0; // 0より大きい間、画面に閃光を出す
+let bombKeyWasDown = false; // 前フレームでボムキーが押されていたか（押した瞬間だけ反応させる）
 
 // ゲーム全体の状態。
 type GameState = "title" | "playing" | "gameover" | "clear";
@@ -331,6 +390,43 @@ function damagePlayer(): void {
   }
 }
 
+// ボム発動：画面全体を攻撃し、敵弾を消し、しばらく無敵になる
+function useBomb(): void {
+  player.bombs -= 1;
+  bombFlash = BOMB_FLASH_TIME;
+  player.invincible = Math.max(player.invincible, BOMB_INVINCIBLE_TIME);
+  playBomb();
+
+  // 画面内の雑魚を全部倒す（爆発と得点つき。アイテムは出ない）
+  for (const e of enemies) {
+    spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 14);
+    score += SCORE_ENEMY;
+    defeated += 1;
+  }
+  enemies.length = 0;
+
+  // 飛んでいる敵弾を全部消す（緊急回避）
+  enemyBullets.length = 0;
+
+  // ボスがいれば大ダメージ
+  if (boss) {
+    boss.hp -= BOSS_BOMB_DAMAGE;
+    spawnExplosion(boss.x, boss.y, "#ffffff", 20);
+    if (boss.hp <= 0) {
+      spawnExplosion(boss.x, boss.y, "#b15cff", 60);
+      playBossExplosion();
+      boss = null;
+      score += SCORE_BOSS;
+      gameState = "clear";
+      resultLock = 0.8;
+      saveHighScoreIfNeeded();
+      setMusic(null);
+    } else {
+      playBossHit();
+    }
+  }
+}
+
 // ゲームを最初の状態に戻す（開始時とリスタート時に呼ぶ）
 function resetGame(): void {
   player.x = WIDTH / 2;
@@ -340,6 +436,9 @@ function resetGame(): void {
   player.invincible = 0;
   player.power = 1;
   player.lean = 0;
+  player.bombs = START_BOMBS;
+  bombFlash = 0;
+  bombKeyWasDown = false;
   bullets.length = 0;
   enemies.length = 0;
   items.length = 0;
@@ -389,6 +488,14 @@ function update(dt: number): void {
       s.x = Math.random() * WIDTH;
     }
   }
+
+  // --- 背景の装飾レイヤー（山・雲・地面）も常に流す ---
+  updateLayer(farHills, dt, 60);
+  updateLayer(clouds, dt, 40);
+  updateLayer(nearGround, dt, 70);
+
+  // ボムの閃光を時間で消していく（どの状態でも進める）
+  if (bombFlash > 0) bombFlash -= dt;
 
   // --- 爆発の破片（どの状態でも動かし続ける）---
   for (let i = particles.length - 1; i >= 0; i--) {
@@ -454,6 +561,13 @@ function update(dt: number): void {
     playShot(player.power);
     player.fireCooldown = FIRE_INTERVAL;
   }
+
+  // --- ボム（緊急回避）：押した瞬間に、残りがあれば発動 ---
+  const bombDown = isDown("KeyX", "ShiftLeft", "ShiftRight");
+  if (bombDown && !bombKeyWasDown && player.bombs > 0) {
+    useBomb();
+  }
+  bombKeyWasDown = bombDown;
 
   // 弾を向きに沿って進める
   for (const b of bullets) {
@@ -1095,19 +1209,65 @@ function drawGorillaBoss(cx: number, cy: number, walk: number, enraged = false):
   ctx.restore();
 }
 
+// 遠い山（暗い青のなだらかな影）
+function drawHill(d: Deco): void {
+  ctx.fillStyle = "#161f38";
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y, 58 * d.scale, 26 * d.scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// 流れる雲（ふわっとした半透明のかたまり）
+function drawCloud(d: Deco): void {
+  const s = d.scale;
+  ctx.fillStyle = "rgba(150, 165, 215, 0.10)";
+  const puffs: [number, number, number, number][] = [
+    [-18, 1, 14, 9],
+    [0, -4, 19, 12],
+    [18, 1, 14, 9],
+    [4, 5, 12, 8],
+  ];
+  for (const [ox, oy, rx, ry] of puffs) {
+    ctx.beginPath();
+    ctx.ellipse(d.x + ox * s, d.y + oy * s, rx * s, ry * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// 近い地面（暗い緑の島。ふちをうっすら明るく）
+function drawGround(d: Deco): void {
+  const s = d.scale;
+  ctx.fillStyle = "#102219";
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y, 50 * s, 30 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(95, 165, 115, 0.18)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
 // -------------------------------------------------------------------
 // render: 今の状態を画面に描く
 // -------------------------------------------------------------------
 function render(): void {
-  // 背景
-  ctx.fillStyle = "#05050f";
+  // 背景の夜空（グラデーション）
+  ctx.fillStyle = skyGradient;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  // いちばん奥：遠い山
+  for (const d of farHills) drawHill(d);
 
   // 星
   ctx.fillStyle = "#aab4ff";
   for (const s of stars) {
     ctx.fillRect(s.x, s.y, s.size, s.size);
   }
+
+  // 中間：流れる雲
+  for (const d of clouds) drawCloud(d);
+
+  // 手前：近い地面の島
+  for (const d of nearGround) drawGround(d);
 
   // タイトル画面（流れる星の上にタイトルだけ表示）
   if (gameState === "title") {
@@ -1121,7 +1281,8 @@ function render(): void {
     ctx.fillText(`HI-SCORE  ${highScore}`, WIDTH / 2, HEIGHT / 2 + 20);
     ctx.fillText("Z / Space でスタート", WIDTH / 2, HEIGHT / 2 + 60);
     ctx.font = "12px monospace";
-    ctx.fillText("移動: 矢印/WASD   ショット: Z/Space", WIDTH / 2, HEIGHT - 40);
+    ctx.fillText("移動: 矢印/WASD   ショット: Z/Space", WIDTH / 2, HEIGHT - 52);
+    ctx.fillText("ボム（緊急回避）: X / Shift", WIDTH / 2, HEIGHT - 34);
     ctx.textAlign = "left";
     return; // タイトル中はここで描画終了
   }
@@ -1178,6 +1339,22 @@ function render(): void {
     drawPlayerGiraffeTurtle(player.x, player.y, player.lean);
   }
 
+  // ボムの閃光（画面全体が白く光り、衝撃波の輪が広がる）
+  if (bombFlash > 0) {
+    const t = bombFlash / BOMB_FLASH_TIME; // 1 → 0 へ
+    ctx.save();
+    ctx.globalAlpha = t * 0.5;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.globalAlpha = t;
+    ctx.strokeStyle = "#bfe9ff";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, (1 - t) * Math.max(WIDTH, HEIGHT), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // プレイ中の情報表示（スコア・残機・パワー）
   ctx.fillStyle = "#ffffff";
   ctx.font = "14px monospace";
@@ -1185,6 +1362,7 @@ function render(): void {
   ctx.fillText(`HI ${highScore}`, 10, 56);
   ctx.fillText(`Lives: ${"▲".repeat(Math.max(0, player.lives))}`, 10, 74);
   ctx.fillText(`Power: ${player.power} / ${POWER_MAX}`, 10, 92);
+  ctx.fillText(`Bomb: ${player.bombs > 0 ? "●".repeat(player.bombs) : "なし"}`, 10, 110);
 
   // 「WARNING」表示：ボス入場中の演出
   if (boss && boss.phase === "enter") {
