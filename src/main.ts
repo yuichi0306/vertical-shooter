@@ -1819,6 +1819,10 @@ function render(): void {
   // ここでゲーム世界の揺れを終了（以降のHUDや決着表示は揺らさない）
   ctx.restore();
 
+  // 画面の文字に薄い影をつける（明るい空テーマでも白文字が埋もれず読める）
+  ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
+  ctx.shadowBlur = 4;
+
   // プレイ中の情報表示（スコア・残機・パワー）
   ctx.fillStyle = "#ffffff";
   ctx.font = "14px monospace";
@@ -1845,6 +1849,10 @@ function render(): void {
     ctx.fillText("WARNING", WIDTH / 2, HEIGHT / 2);
     ctx.textAlign = "left";
   }
+
+  // 影をリセット（以降の描画に影が残らないように）
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
 
   // 決着画面（ゲームオーバー / クリア）
   if (gameState === "gameover" || gameState === "clear") {
