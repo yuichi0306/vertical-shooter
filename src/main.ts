@@ -1,7 +1,7 @@
 // ===================================================================
-// ステップ5: 自機の被弾（残機・無敵時間・ゲームオーバー）
-//   - 敵に触れると1機減り、しばらく無敵（点滅）で復活
-//   - 残機0でゲームオーバー → キーでリスタート
+// ステップ6: パワーアップ（アイテム・段階強化・被弾でダウン）
+//   - 敵を倒すと一定確率でPアイテムを落とす
+//   - 拾うとショットが強化（1→2→3段階）、被弾で1段階ダウン
 // ===================================================================
 
 import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
@@ -77,6 +77,7 @@ const player = {
   fireCooldown: 0, // 次に撃てるようになるまでの残り時間（秒）
   lives: START_LIVES, // 残機
   invincible: 0, // 残りの無敵時間（秒）。0より大きい間は無敵
+  power: 1, // ショットの強化段階（1〜POWER_MAX）
 };
 
 // ゲーム全体の状態。今は「プレイ中」と「ゲームオーバー」の2つ。
@@ -92,8 +93,18 @@ const BULLET_SPEED = 560; // 上へ進む速さ（px/秒）
 const FIRE_INTERVAL = 0.12; // 連射の間隔（秒）。小さいほど速く撃てる
 
 const BULLET_RADIUS = 4; // 当たり判定用の半径
-type Bullet = { x: number; y: number };
+// vx/vy … 1秒あたりに進む量（拡散ショットで斜めに飛ばすために向きを持たせる）
+type Bullet = { x: number; y: number; vx: number; vy: number };
 const bullets: Bullet[] = [];
+
+// パワーアップ
+const POWER_MAX = 3; // 最大強化段階
+const ITEM_DROP_RATE = 0.15; // 敵撃破時にアイテムが出る確率（0.15 = 15%）
+const ITEM_RADIUS = 10; // アイテムの大きさ／当たり判定
+const ITEM_SPEED = 90; // アイテムが下りる速さ（px/秒）
+
+type Item = { x: number; y: number };
+const items: Item[] = [];
 
 // -------------------------------------------------------------------
 // 敵
@@ -125,6 +136,24 @@ function spawnEnemy(kind: EnemyKind, xRatio: number): void {
   enemies.push({ x, y: -ENEMY_RADIUS, hp: ENEMY_HP, kind, baseX: x, age: 0 });
 }
 
+// 自機のショットを撃つ。強化段階で弾の数と広がりが変わる。
+function fireShot(): void {
+  const y = player.y - 16;
+  if (player.power >= 3) {
+    // 3段階：正面 + 左右に少し開く3way
+    bullets.push({ x: player.x, y, vx: 0, vy: -BULLET_SPEED });
+    bullets.push({ x: player.x, y, vx: -150, vy: -BULLET_SPEED });
+    bullets.push({ x: player.x, y, vx: 150, vy: -BULLET_SPEED });
+  } else if (player.power === 2) {
+    // 2段階：左右に並んだ2発
+    bullets.push({ x: player.x - 8, y, vx: 0, vy: -BULLET_SPEED });
+    bullets.push({ x: player.x + 8, y, vx: 0, vy: -BULLET_SPEED });
+  } else {
+    // 1段階：正面に1発
+    bullets.push({ x: player.x, y, vx: 0, vy: -BULLET_SPEED });
+  }
+}
+
 // ゲームを最初の状態に戻す（開始時とリスタート時に呼ぶ）
 function resetGame(): void {
   player.x = WIDTH / 2;
@@ -132,8 +161,10 @@ function resetGame(): void {
   player.fireCooldown = 0;
   player.lives = START_LIVES;
   player.invincible = 0;
+  player.power = 1;
   bullets.length = 0;
   enemies.length = 0;
+  items.length = 0;
   stageTime = 0;
   nextEventIndex = 0;
   defeated = 0;
@@ -213,17 +244,19 @@ function update(dt: number): void {
   // --- ショット ---
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
   if (isDown("KeyZ", "Space") && player.fireCooldown <= 0) {
-    bullets.push({ x: player.x, y: player.y - 16 });
+    fireShot();
     player.fireCooldown = FIRE_INTERVAL;
   }
 
-  // 弾を上へ進める
+  // 弾を向きに沿って進める
   for (const b of bullets) {
-    b.y -= BULLET_SPEED * dt;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
   }
-  // 画面の上に出た弾を消す（残し続けると重くなるため）
+  // 画面の外（上・左右）に出た弾を消す
   for (let i = bullets.length - 1; i >= 0; i--) {
-    if (bullets[i].y < -10) bullets.splice(i, 1);
+    const b = bullets[i];
+    if (b.y < -10 || b.x < -10 || b.x > WIDTH + 10) bullets.splice(i, 1);
   }
 
   // --- 敵の出現（データ駆動タイムライン）---
@@ -259,9 +292,25 @@ function update(dt: number): void {
         if (e.hp <= 0) {
           enemies.splice(ei, 1); // 敵を倒した
           defeated += 1;
+          // 一定確率でパワーアップアイテムを落とす
+          if (Math.random() < ITEM_DROP_RATE) {
+            items.push({ x: e.x, y: e.y });
+          }
         }
         break; // この弾はもう消えたので、次の弾へ
       }
+    }
+  }
+
+  // --- アイテム：落下 → 自機が拾うと強化、画面外で消える ---
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    it.y += ITEM_SPEED * dt;
+    if (hit(player.x, player.y, PLAYER_RADIUS, it.x, it.y, ITEM_RADIUS)) {
+      items.splice(i, 1);
+      player.power = Math.min(POWER_MAX, player.power + 1); // 1段階アップ
+    } else if (it.y > HEIGHT + ITEM_RADIUS) {
+      items.splice(i, 1); // 拾えず画面下へ
     }
   }
 
@@ -272,6 +321,7 @@ function update(dt: number): void {
       if (hit(player.x, player.y, PLAYER_RADIUS, e.x, e.y, ENEMY_RADIUS)) {
         enemies.splice(ei, 1); // ぶつかった敵は壊れる
         player.lives -= 1; // 残機を1減らす
+        player.power = Math.max(1, player.power - 1); // 被弾で1段階ダウン
         if (player.lives <= 0) {
           gameState = "gameover";
           gameoverLock = 0.8; // 0.8秒は入力を無視（誤リスタート防止）
@@ -314,6 +364,17 @@ function render(): void {
     );
   }
 
+  // パワーアップアイテム（青い四角に P）
+  for (const it of items) {
+    ctx.fillStyle = "#3da9ff";
+    ctx.fillRect(it.x - ITEM_RADIUS, it.y - ITEM_RADIUS, ITEM_RADIUS * 2, ITEM_RADIUS * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 14px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("P", it.x, it.y + 5);
+    ctx.textAlign = "left";
+  }
+
   // 自機のショット
   ctx.fillStyle = "#fff36b";
   for (const b of bullets) {
@@ -340,7 +401,8 @@ function render(): void {
   ctx.fillText(`FPS: ${fps}`, 10, 22);
   ctx.fillText(`Defeated: ${defeated}`, 10, 42);
   ctx.fillText(`Lives: ${"▲".repeat(Math.max(0, player.lives))}`, 10, 62);
-  ctx.fillText("Move: Arrow/WASD   Shot: Z/Space", 10, 82);
+  ctx.fillText(`Power: ${player.power} / ${POWER_MAX}`, 10, 82);
+  ctx.fillText("Move: Arrow/WASD   Shot: Z/Space", 10, 102);
 
   // 道中が終わり、敵も全部いなくなったら表示（ボスはステップ7で接続）
   if (
