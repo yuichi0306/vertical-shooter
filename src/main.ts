@@ -1,7 +1,7 @@
 // ===================================================================
-// ステップ2: 自機の操作（移動とショット）
-//   - 矢印キー / WASD で移動
-//   - Z または スペース でショット
+// ステップ3: 敵の出現と、円どうしの当たり判定
+//   - 敵が上から下りてくる（今は一定間隔の仮出現）
+//   - 自分の弾が敵に当たると、両方消える
 // ===================================================================
 
 // ゲーム内部の解像度（座標はすべてこのサイズを基準に書く）
@@ -78,8 +78,41 @@ const player = {
 const BULLET_SPEED = 560; // 上へ進む速さ（px/秒）
 const FIRE_INTERVAL = 0.12; // 連射の間隔（秒）。小さいほど速く撃てる
 
+const BULLET_RADIUS = 4; // 当たり判定用の半径
 type Bullet = { x: number; y: number };
 const bullets: Bullet[] = [];
+
+// -------------------------------------------------------------------
+// 敵
+// -------------------------------------------------------------------
+const ENEMY_RADIUS = 16; // 見た目／当たり判定の半径
+const ENEMY_SPEED = 110; // 下りてくる速さ（px/秒）
+const ENEMY_HP = 1; // 倒すのに必要な被弾数
+const SPAWN_INTERVAL = 0.8; // 仮：何秒ごとに敵を1体出すか（ステップ4で置き換え）
+
+type Enemy = { x: number; y: number; hp: number };
+const enemies: Enemy[] = [];
+let spawnTimer = 0;
+
+// 倒した数（スコアの土台。正式なスコア表示はステップ8で整える）
+let defeated = 0;
+
+// 二点が「当たっているか」を円どうしで判定する。
+// 距離が「半径の合計」より近ければ当たり。
+// （平方根を使わず、両辺を2乗で比べると速い）
+function hit(
+  ax: number,
+  ay: number,
+  ar: number,
+  bx: number,
+  by: number,
+  br: number,
+): boolean {
+  const dx = ax - bx;
+  const dy = ay - by;
+  const r = ar + br;
+  return dx * dx + dy * dy < r * r;
+}
 
 // FPS計測用
 let fps = 0;
@@ -136,6 +169,41 @@ function update(dt: number): void {
   for (let i = bullets.length - 1; i >= 0; i--) {
     if (bullets[i].y < -10) bullets.splice(i, 1);
   }
+
+  // --- 敵の出現（仮：一定間隔。ステップ4でデータ駆動に置き換え）---
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnTimer = SPAWN_INTERVAL;
+    const x = ENEMY_RADIUS + Math.random() * (WIDTH - ENEMY_RADIUS * 2);
+    enemies.push({ x, y: -ENEMY_RADIUS, hp: ENEMY_HP });
+  }
+
+  // --- 敵の移動 ---
+  for (const e of enemies) {
+    e.y += ENEMY_SPEED * dt;
+  }
+
+  // --- 当たり判定：自分の弾 × 敵 ---
+  for (let bi = bullets.length - 1; bi >= 0; bi--) {
+    const b = bullets[bi];
+    for (let ei = enemies.length - 1; ei >= 0; ei--) {
+      const e = enemies[ei];
+      if (hit(b.x, b.y, BULLET_RADIUS, e.x, e.y, ENEMY_RADIUS)) {
+        bullets.splice(bi, 1); // 弾は消える
+        e.hp -= 1;
+        if (e.hp <= 0) {
+          enemies.splice(ei, 1); // 敵を倒した
+          defeated += 1;
+        }
+        break; // この弾はもう消えたので、次の弾へ
+      }
+    }
+  }
+
+  // --- 画面の下に出た敵を消す（今は素通り。被弾はステップ5で実装）---
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    if (enemies[i].y > HEIGHT + ENEMY_RADIUS) enemies.splice(i, 1);
+  }
 }
 
 // -------------------------------------------------------------------
@@ -150,6 +218,17 @@ function render(): void {
   ctx.fillStyle = "#aab4ff";
   for (const s of stars) {
     ctx.fillRect(s.x, s.y, s.size, s.size);
+  }
+
+  // 敵（赤い四角）
+  ctx.fillStyle = "#ff5c7a";
+  for (const e of enemies) {
+    ctx.fillRect(
+      e.x - ENEMY_RADIUS,
+      e.y - ENEMY_RADIUS,
+      ENEMY_RADIUS * 2,
+      ENEMY_RADIUS * 2,
+    );
   }
 
   // 自機のショット
@@ -171,7 +250,8 @@ function render(): void {
   ctx.fillStyle = "#ffffff";
   ctx.font = "14px monospace";
   ctx.fillText(`FPS: ${fps}`, 10, 22);
-  ctx.fillText("Move: Arrow/WASD   Shot: Z/Space", 10, 42);
+  ctx.fillText(`Defeated: ${defeated}`, 10, 42);
+  ctx.fillText("Move: Arrow/WASD   Shot: Z/Space", 10, 62);
 }
 
 // -------------------------------------------------------------------
