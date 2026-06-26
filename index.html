@@ -2,7 +2,10 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>縦スクロール シューティング</title>
     <style>
       html,
@@ -15,15 +18,23 @@
         justify-content: center;
         overflow: hidden;
         font-family: sans-serif;
+        /* スマホで画面を引っぱったり二本指ズームしたりしないように */
+        overscroll-behavior: none;
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
       }
-      /* ゲーム画面（480x640）を、ウィンドウの高さに合わせて拡大表示する */
+      /* ゲーム画面（480x640）を、画面の縦横どちらにも収まるよう拡大表示する */
       #game {
         image-rendering: pixelated; /* 拡大時にドットをくっきり */
-        height: 100vh;
-        max-height: 100vh;
+        /* 画面の幅と高さの小さい方に合わせる（スマホでも全体が見える） */
+        width: min(100vw, 75vh); /* 75vh = 100vh × 480/640 */
+        height: auto;
         aspect-ratio: 480 / 640;
         background: #000;
         box-shadow: 0 0 40px rgba(80, 120, 255, 0.3);
+        touch-action: none; /* 指の操作をゲームだけに使う */
       }
     </style>
   </head>

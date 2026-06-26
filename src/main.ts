@@ -50,6 +50,142 @@ function isDown(...codes: string[]): boolean {
 }
 
 // -------------------------------------------------------------------
+// タッチ操作（スマホ）：画面下に「移動パッド（左）」と
+// 「ショット／ボムボタン（右）」を出して、指で遊べるようにする。
+// -------------------------------------------------------------------
+// 操作パーツの位置と大きさ（ゲーム内座標 480x640 が基準）
+const PAD_CX = 82; // 移動パッドの中心X
+const PAD_CY = HEIGHT - 90; // 移動パッドの中心Y
+const PAD_R = 60; // 移動パッドの大きさ（半径）
+const PAD_DEAD = 9; // これより内側は「動かさない」あそび
+const SHOT_CX = WIDTH - 62; // ショットボタン
+const SHOT_CY = HEIGHT - 64;
+const SHOT_R = 44;
+const BOMB_CX = WIDTH - 122; // ボムボタン
+const BOMB_CY = HEIGHT - 118;
+const BOMB_R = 32;
+
+// タッチで今どう動かしたいか（-1〜+1）。0なら止まる
+let touchDirX = 0;
+let touchDirY = 0;
+let touchFire = false; // ショットボタンを押している間 true
+let uiTap = false; // タイトル/決着画面でのタップ（開始・タイトルへ戻る用）
+// タッチ端末かどうか（最初に判定）。操作ボタンの表示に使う
+let showTouchControls =
+  "ontouchstart" in window || (navigator.maxTouchPoints ?? 0) > 0;
+
+// どの指（識別番号）がどのボタンを担当しているか
+type TouchRole = "move" | "shot" | "bomb" | "ui";
+const touchRoles = new Map<number, TouchRole>();
+
+// 点 (px,py) が円 (cx,cy,r) の中にあるか
+function inCircle(px: number, py: number, cx: number, cy: number, r: number): boolean {
+  const dx = px - cx;
+  const dy = py - cy;
+  return dx * dx + dy * dy <= r * r;
+}
+
+// 画面（ピクセル）座標を、ゲーム内座標（480x640）に変換する
+function toGame(clientX: number, clientY: number): { x: number; y: number } {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: ((clientX - rect.left) / rect.width) * WIDTH,
+    y: ((clientY - rect.top) / rect.height) * HEIGHT,
+  };
+}
+
+// 移動パッドに触れた指の位置から、進みたい向き（-1〜+1）を求める
+function updatePadDir(gx: number, gy: number): void {
+  const dx = gx - PAD_CX;
+  const dy = gy - PAD_CY;
+  const dist = Math.hypot(dx, dy);
+  if (dist < PAD_DEAD) {
+    touchDirX = 0;
+    touchDirY = 0;
+    return;
+  }
+  // パッドの端まで倒すと最大速度。半径で正規化し、1を超えないようにする
+  const scale = Math.min(1, dist / PAD_R) / dist;
+  touchDirX = dx * scale;
+  touchDirY = dy * scale;
+}
+
+// ショットボタンを押している指がまだ残っているか調べ直す
+function recomputeFire(): void {
+  touchFire = false;
+  for (const role of touchRoles.values()) {
+    if (role === "shot") {
+      touchFire = true;
+      break;
+    }
+  }
+}
+
+canvas.addEventListener(
+  "touchstart",
+  (e) => {
+    e.preventDefault();
+    initAudio(); // 最初のタッチで音を有効化（ブラウザの制限対策）
+    showTouchControls = true;
+    for (const t of Array.from(e.changedTouches)) {
+      const g = toGame(t.clientX, t.clientY);
+      // タイトル/決着画面では、どこを触ってもタップ＝決定
+      if (gameState !== "playing") {
+        uiTap = true;
+        touchRoles.set(t.identifier, "ui");
+        continue;
+      }
+      if (inCircle(g.x, g.y, BOMB_CX, BOMB_CY, BOMB_R)) {
+        touchRoles.set(t.identifier, "bomb");
+        if (player.bombs > 0) useBomb();
+      } else if (inCircle(g.x, g.y, SHOT_CX, SHOT_CY, SHOT_R)) {
+        touchRoles.set(t.identifier, "shot");
+        touchFire = true;
+      } else if (g.x < WIDTH / 2) {
+        // 画面の左半分は移動パッド扱い（パッドの外でもOK）
+        touchRoles.set(t.identifier, "move");
+        updatePadDir(g.x, g.y);
+      } else {
+        // 画面の右半分の余白もショット扱い（押しやすさのため）
+        touchRoles.set(t.identifier, "shot");
+        touchFire = true;
+      }
+    }
+  },
+  { passive: false },
+);
+
+canvas.addEventListener(
+  "touchmove",
+  (e) => {
+    e.preventDefault();
+    for (const t of Array.from(e.changedTouches)) {
+      if (touchRoles.get(t.identifier) === "move") {
+        const g = toGame(t.clientX, t.clientY);
+        updatePadDir(g.x, g.y);
+      }
+    }
+  },
+  { passive: false },
+);
+
+function endTouch(e: TouchEvent): void {
+  e.preventDefault();
+  for (const t of Array.from(e.changedTouches)) {
+    const role = touchRoles.get(t.identifier);
+    touchRoles.delete(t.identifier);
+    if (role === "move") {
+      // 移動の指が離れたら停止（別の移動指があれば次のtouchmoveで上書きされる）
+      touchDirX = 0;
+      touchDirY = 0;
+    }
+  }
+  recomputeFire();
+}
+canvas.addEventListener("touchend", endTouch, { passive: false });
+canvas.addEventListener("touchcancel", endTouch, { passive: false });
+
+// -------------------------------------------------------------------
 // 背景の星：下に流れることで「スクロールしている」感じを出す
 // -------------------------------------------------------------------
 type Star = { x: number; y: number; speed: number; size: number };
@@ -608,6 +744,11 @@ function resetGame(): void {
   defeated = 0;
   score = 0;
   newRecord = false;
+  // タッチ操作の状態も初期化（押しっぱなし扱いが残らないように）
+  touchDirX = 0;
+  touchDirY = 0;
+  touchFire = false;
+  touchRoles.clear();
   gameState = "playing";
   setMusic("normal"); // 道中は通常BGM
 }
@@ -666,17 +807,21 @@ function update(dt: number): void {
     if (p.life <= 0) particles.splice(i, 1);
   }
 
-  // タイトル画面：キーでゲーム開始
+  // この1フレームのタップ（タッチ操作）を1回だけ取り出す
+  const tapped = uiTap;
+  uiTap = false;
+
+  // タイトル画面：キー or タップでゲーム開始
   if (gameState === "title") {
     if (titleLock > 0) titleLock -= dt;
-    else if (isDown("KeyZ", "Space", "Enter")) resetGame();
+    else if (isDown("KeyZ", "Space", "Enter") || tapped) resetGame();
     return;
   }
 
-  // 決着後（ゲームオーバー / クリア）は、キーでタイトルへ戻る
+  // 決着後（ゲームオーバー / クリア）は、キー or タップでタイトルへ戻る
   if (gameState === "gameover" || gameState === "clear") {
     if (resultLock > 0) resultLock -= dt;
-    else if (isDown("KeyZ", "Space", "Enter")) {
+    else if (isDown("KeyZ", "Space", "Enter") || tapped) {
       gameState = "title";
       titleLock = 0.4; // 押しっぱなしで即スタートしないように
       theme = "night"; // タイトルは夜空の背景に戻す
@@ -702,6 +847,12 @@ function update(dt: number): void {
     dy *= inv;
   }
 
+  // タッチの移動パッドが使われていれば、そちらを優先（指の倒し具合で速さが変わる）
+  if (touchDirX !== 0 || touchDirY !== 0) {
+    dx = touchDirX;
+    dy = touchDirY;
+  }
+
   player.x += dx * PLAYER_SPEED * dt;
   player.y += dy * PLAYER_SPEED * dt;
 
@@ -713,9 +864,9 @@ function update(dt: number): void {
   player.x = Math.max(PLAYER_RADIUS, Math.min(WIDTH - PLAYER_RADIUS, player.x));
   player.y = Math.max(PLAYER_RADIUS, Math.min(HEIGHT - PLAYER_RADIUS, player.y));
 
-  // --- ショット ---
+  // --- ショット（キー or タッチのショットボタン）---
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
-  if (isDown("KeyZ", "Space") && player.fireCooldown <= 0) {
+  if ((isDown("KeyZ", "Space") || touchFire) && player.fireCooldown <= 0) {
     fireShot();
     playShot(player.power);
     player.fireCooldown = FIRE_INTERVAL;
@@ -1710,6 +1861,64 @@ function drawBackground(): void {
   }
 }
 
+// スマホ用の操作ボタン（移動パッド・ショット・ボム）を画面下に描く
+function drawTouchControls(): void {
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  // --- 移動パッド（左下）---
+  ctx.fillStyle = "rgba(255, 255, 255, 0.07)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.30)";
+  ctx.beginPath();
+  ctx.arc(PAD_CX, PAD_CY, PAD_R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // 中心の十字（矢印）
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.30)";
+  ctx.beginPath();
+  ctx.moveTo(PAD_CX - PAD_R * 0.5, PAD_CY);
+  ctx.lineTo(PAD_CX + PAD_R * 0.5, PAD_CY);
+  ctx.moveTo(PAD_CX, PAD_CY - PAD_R * 0.5);
+  ctx.lineTo(PAD_CX, PAD_CY + PAD_R * 0.5);
+  ctx.stroke();
+  // 倒している向きを示すツマミ
+  const kx = PAD_CX + touchDirX * PAD_R * 0.55;
+  const ky = PAD_CY + touchDirY * PAD_R * 0.55;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+  ctx.beginPath();
+  ctx.arc(kx, ky, 19, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- ショットボタン（右下）---
+  ctx.fillStyle = touchFire ? "rgba(255, 243, 107, 0.5)" : "rgba(255, 243, 107, 0.20)";
+  ctx.strokeStyle = "rgba(255, 243, 107, 0.7)";
+  ctx.beginPath();
+  ctx.arc(SHOT_CX, SHOT_CY, SHOT_R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.font = "bold 15px monospace";
+  ctx.fillText("ショット", SHOT_CX, SHOT_CY);
+
+  // --- ボムボタン（ショットの左上）---
+  const noBomb = player.bombs <= 0;
+  ctx.fillStyle = noBomb ? "rgba(120, 120, 120, 0.18)" : "rgba(140, 210, 255, 0.28)";
+  ctx.strokeStyle = noBomb ? "rgba(160, 160, 160, 0.4)" : "rgba(140, 210, 255, 0.8)";
+  ctx.beginPath();
+  ctx.arc(BOMB_CX, BOMB_CY, BOMB_R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.font = "bold 13px monospace";
+  ctx.fillText("ボム", BOMB_CX, BOMB_CY - 5);
+  ctx.font = "11px monospace";
+  ctx.fillText(`×${player.bombs}`, BOMB_CX, BOMB_CY + 9);
+
+  ctx.restore();
+}
+
 // -------------------------------------------------------------------
 // render: 今の状態を画面に描く
 // -------------------------------------------------------------------
@@ -1727,10 +1936,19 @@ function render(): void {
     ctx.fillStyle = "#ffffff";
     ctx.font = "16px monospace";
     ctx.fillText(`HI-SCORE  ${highScore}`, WIDTH / 2, HEIGHT / 2 + 20);
-    ctx.fillText("Z / Space でスタート", WIDTH / 2, HEIGHT / 2 + 60);
-    ctx.font = "12px monospace";
-    ctx.fillText("移動: 矢印/WASD   ショット: Z/Space", WIDTH / 2, HEIGHT - 52);
-    ctx.fillText("ボム（緊急回避）: X / Shift", WIDTH / 2, HEIGHT - 34);
+    if (showTouchControls) {
+      // スマホ：タッチ操作の案内
+      ctx.fillText("タップでスタート", WIDTH / 2, HEIGHT / 2 + 60);
+      ctx.font = "12px monospace";
+      ctx.fillText("移動: 左下のパッド", WIDTH / 2, HEIGHT - 52);
+      ctx.fillText("ショット・ボム: 右下のボタン", WIDTH / 2, HEIGHT - 34);
+    } else {
+      // パソコン：キーボード操作の案内
+      ctx.fillText("Z / Space でスタート", WIDTH / 2, HEIGHT / 2 + 60);
+      ctx.font = "12px monospace";
+      ctx.fillText("移動: 矢印/WASD   ショット: Z/Space", WIDTH / 2, HEIGHT - 52);
+      ctx.fillText("ボム（緊急回避）: X / Shift", WIDTH / 2, HEIGHT - 34);
+    }
     ctx.textAlign = "left";
     return; // タイトル中はここで描画終了
   }
@@ -1854,6 +2072,11 @@ function render(): void {
   ctx.shadowColor = "transparent";
   ctx.shadowBlur = 0;
 
+  // スマホ用の操作ボタン（プレイ中だけ・タッチ端末で表示）
+  if (showTouchControls && gameState === "playing") {
+    drawTouchControls();
+  }
+
   // 決着画面（ゲームオーバー / クリア）
   if (gameState === "gameover" || gameState === "clear") {
     const cleared = gameState === "clear";
@@ -1873,7 +2096,11 @@ function render(): void {
     }
     ctx.fillStyle = "#bbbbbb";
     ctx.font = "14px monospace";
-    ctx.fillText("Z / Space でタイトルへ", WIDTH / 2, HEIGHT / 2 + 90);
+    ctx.fillText(
+      showTouchControls ? "タップでタイトルへ" : "Z / Space でタイトルへ",
+      WIDTH / 2,
+      HEIGHT / 2 + 90,
+    );
     ctx.textAlign = "left";
   }
 }
