@@ -1,7 +1,8 @@
 // ===================================================================
-// ステップ6: パワーアップ（アイテム・段階強化・被弾でダウン）
-//   - 敵を倒すと一定確率でPアイテムを落とす
-//   - 拾うとショットが強化（1→2→3段階）、被弾で1段階ダウン
+// ステップ7: ボス戦（体力・攻撃パターン・敵の弾・クリア）
+//   - 道中クリア後にボスが登場
+//   - ボスは攻撃パターンで弾をばらまく／自機を狙う
+//   - ボスのHPを0にするとゲームクリア
 // ===================================================================
 
 import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
@@ -80,11 +81,11 @@ const player = {
   power: 1, // ショットの強化段階（1〜POWER_MAX）
 };
 
-// ゲーム全体の状態。今は「プレイ中」と「ゲームオーバー」の2つ。
+// ゲーム全体の状態。
 // （タイトル画面はステップ8で追加します）
-type GameState = "playing" | "gameover";
+type GameState = "playing" | "gameover" | "clear";
 let gameState: GameState = "playing";
-let gameoverLock = 0; // ゲームオーバー直後、リスタート入力を受け付けない時間（秒）
+let resultLock = 0; // 決着直後、リスタート入力を受け付けない時間（秒）
 
 // -------------------------------------------------------------------
 // 自機のショット（弾）
@@ -105,6 +106,37 @@ const ITEM_SPEED = 90; // アイテムが下りる速さ（px/秒）
 
 type Item = { x: number; y: number };
 const items: Item[] = [];
+
+// -------------------------------------------------------------------
+// 敵の弾（ボスが撃ってくる弾。自機に当たる）
+// -------------------------------------------------------------------
+const EBULLET_RADIUS = 6;
+type EnemyBullet = { x: number; y: number; vx: number; vy: number };
+const enemyBullets: EnemyBullet[] = [];
+
+// -------------------------------------------------------------------
+// ボス
+// -------------------------------------------------------------------
+const BOSS_MAX_HP = 80; // ボスの体力
+const BOSS_RADIUS = 38; // 見た目／当たり判定
+const BOSS_Y_TARGET = 110; // 入場後に留まる高さ
+const BOSS_ENTER_SPEED = 70; // 入場で下りてくる速さ
+const BOSS_SWAY_SPEED = 60; // 戦闘中に左右へ動く速さ
+const BOSS_FIRE_INTERVAL = 1.4; // 攻撃と攻撃の間隔（秒）
+const EBULLET_SPEED = 190; // 敵弾の速さ
+
+// phase … "enter"=入場中, "fight"=戦闘中
+type Boss = {
+  x: number;
+  y: number;
+  hp: number;
+  phase: "enter" | "fight";
+  dir: number; // 左右移動の向き（+1 か -1）
+  fireTimer: number; // 次の攻撃までの残り秒
+  patternIndex: number; // 次に使う攻撃パターン番号
+};
+let boss: Boss | null = null;
+let bossSpawned = false; // このプレイで既にボスを出したか
 
 // -------------------------------------------------------------------
 // 敵
@@ -154,6 +186,64 @@ function fireShot(): void {
   }
 }
 
+// ボスを登場させる
+function spawnBoss(): void {
+  boss = {
+    x: WIDTH / 2,
+    y: -BOSS_RADIUS,
+    hp: BOSS_MAX_HP,
+    phase: "enter",
+    dir: 1,
+    fireTimer: BOSS_FIRE_INTERVAL,
+    patternIndex: 0,
+  };
+  bossSpawned = true;
+}
+
+// 敵弾を1発、指定の向き（角度ラジアン）に撃つ
+function fireEnemyBullet(x: number, y: number, angle: number): void {
+  enemyBullets.push({
+    x,
+    y,
+    vx: Math.cos(angle) * EBULLET_SPEED,
+    vy: Math.sin(angle) * EBULLET_SPEED,
+  });
+}
+
+// 攻撃パターン0：自機を狙って3発（少しずつ角度をずらす）
+function bossPatternAimed(b: Boss): void {
+  const base = Math.atan2(player.y - b.y, player.x - b.x);
+  for (const offset of [-0.15, 0, 0.15]) {
+    fireEnemyBullet(b.x, b.y + BOSS_RADIUS, base + offset);
+  }
+}
+
+// 攻撃パターン1：下方向に扇状にばらまく
+function bossPatternFan(b: Boss): void {
+  const count = 7;
+  const spread = 1.2; // 扇の広さ（ラジアン）
+  const start = Math.PI / 2 - spread / 2; // 真下を中心に
+  for (let i = 0; i < count; i++) {
+    const angle = start + (spread * i) / (count - 1);
+    fireEnemyBullet(b.x, b.y + BOSS_RADIUS, angle);
+  }
+}
+
+// 攻撃パターンの一覧（ここに足せば技が増える）
+const BOSS_PATTERNS = [bossPatternAimed, bossPatternFan];
+
+// 自機がダメージを受けたときの共通処理（敵との接触・敵弾の両方から呼ぶ）
+function damagePlayer(): void {
+  player.lives -= 1;
+  player.power = Math.max(1, player.power - 1); // 被弾で1段階ダウン
+  if (player.lives <= 0) {
+    gameState = "gameover";
+    resultLock = 0.8; // 誤リスタート防止
+  } else {
+    player.invincible = INVINCIBLE_TIME; // しばらく無敵で復活
+  }
+}
+
 // ゲームを最初の状態に戻す（開始時とリスタート時に呼ぶ）
 function resetGame(): void {
   player.x = WIDTH / 2;
@@ -165,6 +255,9 @@ function resetGame(): void {
   bullets.length = 0;
   enemies.length = 0;
   items.length = 0;
+  enemyBullets.length = 0;
+  boss = null;
+  bossSpawned = false;
   stageTime = 0;
   nextEventIndex = 0;
   defeated = 0;
@@ -209,9 +302,9 @@ function update(dt: number): void {
     }
   }
 
-  // ゲームオーバー中は、キー入力でのリスタートだけ受け付ける
-  if (gameState === "gameover") {
-    if (gameoverLock > 0) gameoverLock -= dt;
+  // 決着後（ゲームオーバー / クリア）は、リスタート入力だけ受け付ける
+  if (gameState === "gameover" || gameState === "clear") {
+    if (resultLock > 0) resultLock -= dt;
     else if (isDown("KeyZ", "Space", "Enter")) resetGame();
     return;
   }
@@ -320,14 +413,7 @@ function update(dt: number): void {
       const e = enemies[ei];
       if (hit(player.x, player.y, PLAYER_RADIUS, e.x, e.y, ENEMY_RADIUS)) {
         enemies.splice(ei, 1); // ぶつかった敵は壊れる
-        player.lives -= 1; // 残機を1減らす
-        player.power = Math.max(1, player.power - 1); // 被弾で1段階ダウン
-        if (player.lives <= 0) {
-          gameState = "gameover";
-          gameoverLock = 0.8; // 0.8秒は入力を無視（誤リスタート防止）
-        } else {
-          player.invincible = INVINCIBLE_TIME; // しばらく無敵で復活
-        }
+        damagePlayer();
         break;
       }
     }
@@ -336,6 +422,73 @@ function update(dt: number): void {
   // --- 画面の下に出た敵を消す ---
   for (let i = enemies.length - 1; i >= 0; i--) {
     if (enemies[i].y > HEIGHT + ENEMY_RADIUS) enemies.splice(i, 1);
+  }
+
+  // --- ボスの登場：道中が終わり、雑魚を全部片付けたら出現 ---
+  if (!bossSpawned && stageTime >= STAGE_DURATION && enemies.length === 0) {
+    spawnBoss();
+  }
+
+  // --- ボスの行動 ---
+  if (boss) {
+    if (boss.phase === "enter") {
+      // 所定の高さまで下りてくる
+      boss.y += BOSS_ENTER_SPEED * dt;
+      if (boss.y >= BOSS_Y_TARGET) {
+        boss.y = BOSS_Y_TARGET;
+        boss.phase = "fight";
+      }
+    } else {
+      // 左右に往復しながら、一定間隔で攻撃パターンを撃つ
+      boss.x += boss.dir * BOSS_SWAY_SPEED * dt;
+      if (boss.x < BOSS_RADIUS) {
+        boss.x = BOSS_RADIUS;
+        boss.dir = 1;
+      } else if (boss.x > WIDTH - BOSS_RADIUS) {
+        boss.x = WIDTH - BOSS_RADIUS;
+        boss.dir = -1;
+      }
+
+      boss.fireTimer -= dt;
+      if (boss.fireTimer <= 0) {
+        BOSS_PATTERNS[boss.patternIndex](boss);
+        boss.patternIndex = (boss.patternIndex + 1) % BOSS_PATTERNS.length;
+        boss.fireTimer = BOSS_FIRE_INTERVAL;
+      }
+    }
+
+    // 自分の弾 × ボス
+    for (let bi = bullets.length - 1; bi >= 0; bi--) {
+      const b = bullets[bi];
+      if (hit(b.x, b.y, BULLET_RADIUS, boss.x, boss.y, BOSS_RADIUS)) {
+        bullets.splice(bi, 1);
+        boss.hp -= 1;
+        if (boss.hp <= 0) {
+          boss = null;
+          gameState = "clear";
+          resultLock = 0.8;
+          break;
+        }
+      }
+    }
+  }
+
+  // --- 敵弾：移動 → 自機に当たれば被弾 → 画面外で消える ---
+  for (let i = enemyBullets.length - 1; i >= 0; i--) {
+    const eb = enemyBullets[i];
+    eb.x += eb.vx * dt;
+    eb.y += eb.vy * dt;
+    const offscreen =
+      eb.y < -20 || eb.y > HEIGHT + 20 || eb.x < -20 || eb.x > WIDTH + 20;
+    if (offscreen) {
+      enemyBullets.splice(i, 1);
+    } else if (
+      player.invincible <= 0 &&
+      hit(player.x, player.y, PLAYER_RADIUS, eb.x, eb.y, EBULLET_RADIUS)
+    ) {
+      enemyBullets.splice(i, 1);
+      damagePlayer();
+    }
   }
 }
 
@@ -375,6 +528,32 @@ function render(): void {
     ctx.textAlign = "left";
   }
 
+  // ボス（紫の大きな四角）＋ HPバー
+  if (boss) {
+    ctx.fillStyle = "#b15cff";
+    ctx.fillRect(
+      boss.x - BOSS_RADIUS,
+      boss.y - BOSS_RADIUS,
+      BOSS_RADIUS * 2,
+      BOSS_RADIUS * 2,
+    );
+    // 画面上部のHPバー
+    const barW = WIDTH - 40;
+    const ratio = Math.max(0, boss.hp / BOSS_MAX_HP);
+    ctx.fillStyle = "#3a1a3a";
+    ctx.fillRect(20, 12, barW, 10);
+    ctx.fillStyle = "#ff5cc8";
+    ctx.fillRect(20, 12, barW * ratio, 10);
+  }
+
+  // 敵の弾（赤いまる）
+  ctx.fillStyle = "#ff4d4d";
+  for (const eb of enemyBullets) {
+    ctx.beginPath();
+    ctx.arc(eb.x, eb.y, EBULLET_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   // 自機のショット
   ctx.fillStyle = "#fff36b";
   for (const b of bullets) {
@@ -404,28 +583,25 @@ function render(): void {
   ctx.fillText(`Power: ${player.power} / ${POWER_MAX}`, 10, 82);
   ctx.fillText("Move: Arrow/WASD   Shot: Z/Space", 10, 102);
 
-  // 道中が終わり、敵も全部いなくなったら表示（ボスはステップ7で接続）
-  if (
-    gameState === "playing" &&
-    stageTime >= STAGE_DURATION &&
-    enemies.length === 0
-  ) {
+  // 「WARNING」表示：ボス入場中の演出
+  if (boss && boss.phase === "enter") {
     ctx.textAlign = "center";
-    ctx.font = "28px monospace";
-    ctx.fillText("STAGE CLEAR (道中)", WIDTH / 2, HEIGHT / 2);
-    ctx.font = "14px monospace";
-    ctx.fillText("ボスはステップ7で登場します", WIDTH / 2, HEIGHT / 2 + 28);
+    ctx.fillStyle = "#ff5cc8";
+    ctx.font = "bold 30px monospace";
+    ctx.fillText("WARNING", WIDTH / 2, HEIGHT / 2);
     ctx.textAlign = "left";
   }
 
-  // ゲームオーバー画面
-  if (gameState === "gameover") {
+  // 決着画面（ゲームオーバー / クリア）
+  if (gameState === "gameover" || gameState === "clear") {
+    const cleared = gameState === "clear";
     ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = cleared ? "#7dff9d" : "#ffffff";
     ctx.textAlign = "center";
     ctx.font = "40px monospace";
-    ctx.fillText("GAME OVER", WIDTH / 2, HEIGHT / 2 - 20);
+    ctx.fillText(cleared ? "STAGE CLEAR!" : "GAME OVER", WIDTH / 2, HEIGHT / 2 - 20);
+    ctx.fillStyle = "#ffffff";
     ctx.font = "16px monospace";
     ctx.fillText(`Defeated: ${defeated}`, WIDTH / 2, HEIGHT / 2 + 20);
     ctx.fillText("Z / Space でリスタート", WIDTH / 2, HEIGHT / 2 + 50);
