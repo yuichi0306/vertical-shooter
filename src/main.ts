@@ -309,7 +309,10 @@ let stageBanner = 0; // 0より大きい間、ステージ名を画面中央に�
 // スコア
 const SCORE_ENEMY = 100; // 雑魚1体撃破
 const SCORE_BOSS = 5000; // ボス撃破
+const LIFE_PENALTY = 500; // クリア時、残機が満タンから1減るごとの減点
+const BOMB_PENALTY = 200; // ボムを1回使うごとの減点
 let score = 0;
+let clearLifePenalty = 0; // 直近のクリアで引かれた残機ぶんの減点（表示用）
 
 // ハイスコア（ブラウザに保存して次回も残す）
 const HIGHSCORE_KEY = "vshooter.highscore";
@@ -343,11 +346,13 @@ const bullets: Bullet[] = [];
 
 // パワーアップ
 const POWER_MAX = 3; // 最大強化段階
+const MAX_BOMBS = 9; // ボムの最大ストック数（拾いすぎ防止）
 const ITEM_DROP_RATE = 0.15; // 敵撃破時にアイテムが出る確率（0.15 = 15%）
 const ITEM_RADIUS = 10; // アイテムの大きさ／当たり判定
 const ITEM_SPEED = 90; // アイテムが下りる速さ（px/秒）
 
-type Item = { x: number; y: number };
+// kind … "power"=パワーアップ（キャベツ）／"bomb"=ボム補充（黄金の豚が落とす）
+type Item = { x: number; y: number; kind: "power" | "bomb" };
 const items: Item[] = [];
 
 // -------------------------------------------------------------------
@@ -435,6 +440,9 @@ const EAGLE_WANDER_SPEED = 130; // 鷲：ふらふら横移動する速さ（px/
 const EAGLE_WANDER_MIN = 0.5; // 鷲：方向を変えるまでの最短時間（秒）
 const EAGLE_WANDER_MAX = 1.2; // 鷲：方向を変えるまでの最長時間（秒）
 const EAGLE_FIRE_INTERVAL = 2.0; // 鷲：弾を撃つ間隔（秒）
+const GOLDPIG_HP = 6; // 黄金の豚：硬い（6発で撃破）
+const GOLDPIG_SPEED = 130; // 黄金の豚：画面を横切る速さ（px/秒）
+const GOLDPIG_Y = 95; // 黄金の豚：飛ぶ高さ（中心）
 
 // 種類ごとの爆発の色（撃破エフェクト用）
 const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
@@ -442,6 +450,7 @@ const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
   snake: "#6cc456", // 蛇＝緑
   spider: "#d2453f", // 蜘蛛＝赤
   eagle: "#b5793a", // 鷲＝こげ茶
+  goldpig: "#ffd34d", // 黄金の豚＝金色
 };
 
 // kind … 敵の種類、baseX … 揺れの基準になる横位置、age … 出現からの経過秒
@@ -468,7 +477,8 @@ let nextEventIndex = 0;
 
 // 敵を1体作る
 function spawnEnemy(kind: EnemyKind, xRatio: number): void {
-  const x = xRatio * WIDTH;
+  let x = xRatio * WIDTH;
+  let y = -ENEMY_RADIUS;
   // 発射タイミングを少しずらして、全部が同時に撃たないようにする
   let fireTimer = SNAKE_FIRE_INTERVAL * (0.6 + Math.random() * 0.8);
   let hp = ENEMY_HP;
@@ -478,8 +488,15 @@ function spawnEnemy(kind: EnemyKind, xRatio: number): void {
     hp = EAGLE_HP;
     fireTimer = EAGLE_FIRE_INTERVAL * (0.5 + Math.random());
     vy = EAGLE_FALL_SPEED; // 最初はまっすぐ下りる
+  } else if (kind === "goldpig") {
+    hp = GOLDPIG_HP;
+    // x=0 なら左から右へ、x=1 なら右から左へ、画面の外から飛んでくる
+    const fromLeft = xRatio < 0.5;
+    vx = (fromLeft ? 1 : -1) * GOLDPIG_SPEED;
+    x = fromLeft ? -ENEMY_RADIUS : WIDTH + ENEMY_RADIUS;
+    y = GOLDPIG_Y;
   }
-  enemies.push({ x, y: -ENEMY_RADIUS, hp, kind, baseX: x, age: 0, fireTimer, vx, vy, wanderTimer: 0 });
+  enemies.push({ x, y, hp, kind, baseX: x, age: 0, fireTimer, vx, vy, wanderTimer: 0 });
 }
 
 // 自機のショットを撃つ。強化段階で弾の数と広がりが変わる。
@@ -652,6 +669,7 @@ function damagePlayer(): void {
 // ボム発動：画面全体を攻撃し、敵弾を消し、しばらく無敵になる
 function useBomb(): void {
   player.bombs -= 1;
+  score = Math.max(0, score - BOMB_PENALTY); // ボムを使うと減点
   bombFlash = BOMB_FLASH_TIME;
   player.invincible = Math.max(player.invincible, BOMB_INVINCIBLE_TIME);
   playBomb();
@@ -659,7 +677,7 @@ function useBomb(): void {
   // 画面内の雑魚を全部倒す（爆発と得点つき。アイテムは出ない）
   for (const e of enemies) {
     spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 14);
-    score += SCORE_ENEMY;
+    score += e.kind === "goldpig" ? SCORE_ENEMY * 2 : SCORE_ENEMY;
     defeated += 1;
   }
   enemies.length = 0;
@@ -692,6 +710,9 @@ function defeatBoss(): void {
     advanceStage(); // 次のステージへ（連戦）
   } else {
     gameState = "clear"; // 最後のボスを倒した＝全クリア
+    // 残機が満タンから1減るごとに減点（残機を多く残すほど高得点）
+    clearLifePenalty = Math.max(0, START_LIVES - player.lives) * LIFE_PENALTY;
+    score = Math.max(0, score - clearLifePenalty);
     resultLock = 0.8;
     saveHighScoreIfNeeded();
     setMusic(null);
@@ -743,6 +764,7 @@ function resetGame(): void {
   nextEventIndex = 0;
   defeated = 0;
   score = 0;
+  clearLifePenalty = 0;
   newRecord = false;
   // タッチ操作の状態も初期化（押しっぱなし扱いが残らないように）
   touchDirX = 0;
@@ -926,6 +948,10 @@ function update(dt: number): void {
       // 蜘蛛：糸で上下に伸び縮みしながら（縦に動いて）下りる。
       // 速さをサイン波で増減させ、時には少し上に戻る＝縦のビヨンビヨン感を出す
       e.y += SPIDER_SPEED * (0.6 + Math.sin(e.age * SPIDER_FREQ)) * dt;
+    } else if (e.kind === "goldpig") {
+      // 黄金の豚：画面を横切りながら、ふわふわ上下に揺れて飛ぶ（横に出たら退場）
+      e.x += e.vx * dt;
+      e.y = GOLDPIG_Y + Math.sin(e.age * 2.5) * 24;
     } else {
       // 鷲：一定時間ごとに進む向きをランダムに変えて、ふらふら動き回る。
       // 横は気まぐれ、縦は必ず少しずつ下りる（いつか画面外へ出る）。
@@ -966,13 +992,20 @@ function update(dt: number): void {
         if (e.hp <= 0) {
           enemies.splice(ei, 1); // 敵を倒した
           defeated += 1;
-          score += SCORE_ENEMY;
-          spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 14);
-          playExplosion();
-          // 一定確率でパワーアップアイテムを落とす
-          if (Math.random() < ITEM_DROP_RATE) {
-            items.push({ x: e.x, y: e.y });
+          if (e.kind === "goldpig") {
+            // 黄金の豚：得点は2倍。撃破すると必ずボムを落とす
+            score += SCORE_ENEMY * 2;
+            spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 30);
+            items.push({ x: e.x, y: e.y, kind: "bomb" });
+          } else {
+            score += SCORE_ENEMY;
+            spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 14);
+            // 一定確率でパワーアップアイテムを落とす
+            if (Math.random() < ITEM_DROP_RATE) {
+              items.push({ x: e.x, y: e.y, kind: "power" });
+            }
           }
+          playExplosion();
         }
         break; // この弾はもう消えたので、次の弾へ
       }
@@ -985,7 +1018,11 @@ function update(dt: number): void {
     it.y += ITEM_SPEED * dt;
     if (hit(player.x, player.y, PLAYER_RADIUS, it.x, it.y, ITEM_RADIUS)) {
       items.splice(i, 1);
-      player.power = Math.min(POWER_MAX, player.power + 1); // 1段階アップ
+      if (it.kind === "bomb") {
+        player.bombs = Math.min(MAX_BOMBS, player.bombs + 1); // ボムを1つ補充
+      } else {
+        player.power = Math.min(POWER_MAX, player.power + 1); // 1段階アップ
+      }
     } else if (it.y > HEIGHT + ITEM_RADIUS) {
       items.splice(i, 1); // 拾えず画面下へ
     }
@@ -1003,9 +1040,16 @@ function update(dt: number): void {
     }
   }
 
-  // --- 画面の下に出た敵を消す ---
+  // --- 画面の外（下・左右）に出た敵を消す（横切る黄金の豚は左右で退場）---
   for (let i = enemies.length - 1; i >= 0; i--) {
-    if (enemies[i].y > HEIGHT + ENEMY_RADIUS) enemies.splice(i, 1);
+    const e = enemies[i];
+    if (
+      e.y > HEIGHT + ENEMY_RADIUS ||
+      e.x < -ENEMY_RADIUS - 30 ||
+      e.x > WIDTH + ENEMY_RADIUS + 30
+    ) {
+      enemies.splice(i, 1);
+    }
   }
 
   // --- ボスの登場：道中が終わり、雑魚を全部片付けたら出現 ---
@@ -1491,12 +1535,132 @@ function drawEagle(cx: number, cy: number, age: number): void {
   ctx.restore();
 }
 
+// -------------------------------------------------------------------
+// 敵その5：黄金の豚（レア）。(cx, cy) が中心。age できらめく。
+// -------------------------------------------------------------------
+function drawGoldPig(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const GOLD = "#f4c63a"; // 金色
+  const GOLD_DARK = "#c8961a"; // 影の金色
+  const GOLD_LIGHT = "#ffe98a"; // ハイライト
+
+  // ほんのり光るオーラ（レア感）
+  const pulse = 0.5 + 0.5 * Math.sin(age * 6);
+  ctx.save();
+  ctx.globalAlpha = 0.18 + pulse * 0.18;
+  ctx.fillStyle = "#fff0a0";
+  ctx.beginPath();
+  ctx.arc(0, 0, 24, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // 耳
+  ctx.fillStyle = GOLD_DARK;
+  ctx.beginPath();
+  ctx.moveTo(-12, -10);
+  ctx.lineTo(-5, -16);
+  ctx.lineTo(-4, -7);
+  ctx.closePath();
+  ctx.moveTo(12, -10);
+  ctx.lineTo(5, -16);
+  ctx.lineTo(4, -7);
+  ctx.closePath();
+  ctx.fill();
+
+  // 足
+  ctx.fillStyle = GOLD_DARK;
+  ctx.fillRect(-9, 9, 5, 6);
+  ctx.fillRect(4, 9, 5, 6);
+
+  // 体（まるい胴）
+  ctx.fillStyle = GOLD;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 16, 13, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 上のハイライト
+  ctx.fillStyle = GOLD_LIGHT;
+  ctx.beginPath();
+  ctx.ellipse(-4, -5, 7, 4, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 鼻（ブタの口）
+  ctx.fillStyle = GOLD_DARK;
+  ctx.beginPath();
+  ctx.ellipse(0, 4, 6, 4.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#7a5a10";
+  ctx.beginPath();
+  ctx.arc(-2, 4, 1, 0, Math.PI * 2);
+  ctx.arc(2, 4, 1, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 目
+  ctx.fillStyle = "#1c1208";
+  ctx.beginPath();
+  ctx.arc(-5, -3, 1.6, 0, Math.PI * 2);
+  ctx.arc(5, -3, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // くるんとしたしっぽ
+  ctx.strokeStyle = GOLD_DARK;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(17, 2, 3, Math.PI, Math.PI * 2.6);
+  ctx.stroke();
+
+  // きらめき（チカッと光る）
+  if (pulse > 0.7) {
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(-9, -9, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 // 敵を種類に応じた姿で描く
 function drawEnemy(e: Enemy): void {
   if (e.kind === "snail") drawSnail(e.x, e.y);
   else if (e.kind === "snake") drawSnake(e.x, e.y);
   else if (e.kind === "spider") drawSpider(e.x, e.y);
-  else drawEagle(e.x, e.y, e.age);
+  else if (e.kind === "eagle") drawEagle(e.x, e.y, e.age);
+  else drawGoldPig(e.x, e.y, e.age);
+}
+
+// ボム補充アイテム（黄金の豚が落とす）の姿。(cx, cy) が中心。
+function drawBombItem(cx: number, cy: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  // 本体（黒い玉）
+  ctx.fillStyle = "#2b2f3a";
+  ctx.beginPath();
+  ctx.arc(0, 2, 8, 0, Math.PI * 2);
+  ctx.fill();
+  // ハイライト
+  ctx.fillStyle = "rgba(255,255,255,0.5)";
+  ctx.beginPath();
+  ctx.arc(-3, -1, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  // 導火線
+  ctx.strokeStyle = "#9a7b3a";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(3, -5);
+  ctx.quadraticCurveTo(8, -9, 6, -12);
+  ctx.stroke();
+  // 火花
+  ctx.fillStyle = "#ffb648";
+  ctx.beginPath();
+  ctx.arc(6, -13, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff0a0";
+  ctx.beginPath();
+  ctx.arc(6, -13, 1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 // -------------------------------------------------------------------
@@ -1967,9 +2131,10 @@ function render(): void {
     drawEnemy(e);
   }
 
-  // パワーアップアイテム（キャベツ）
+  // アイテム（キャベツ＝パワーアップ／ボム＝ボム補充）
   for (const it of items) {
-    drawCabbage(it.x, it.y);
+    if (it.kind === "bomb") drawBombItem(it.x, it.y);
+    else drawCabbage(it.x, it.y);
   }
 
   // ボス（種類に応じた姿）＋ HPバー
@@ -2090,6 +2255,14 @@ function render(): void {
     ctx.font = "18px monospace";
     ctx.fillText(`SCORE  ${score}`, WIDTH / 2, HEIGHT / 2);
     ctx.fillText(`HI-SCORE  ${highScore}`, WIDTH / 2, HEIGHT / 2 + 26);
+    // クリア時、残機ぶんの減点があれば理由を表示
+    if (cleared && clearLifePenalty > 0) {
+      ctx.fillStyle = "#ff9a9a";
+      ctx.font = "13px monospace";
+      ctx.fillText(`残機減点  -${clearLifePenalty}`, WIDTH / 2, HEIGHT / 2 - 24);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "18px monospace";
+    }
     if (newRecord) {
       ctx.fillStyle = "#fff36b";
       ctx.fillText("NEW RECORD!", WIDTH / 2, HEIGHT / 2 + 54);

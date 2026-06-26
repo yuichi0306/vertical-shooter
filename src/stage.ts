@@ -15,7 +15,9 @@
 //   "snake"  … 蛇。左右にくねくね横移動しながら下りてくる
 //   "spider" … 蜘蛛。糸で上下にビヨンと伸び縮みしながら（縦に動いて）下りてくる
 //   "eagle"  … 鷲。ランダムにふらふら動き回りながら、自機へ弾を撃ってくる
-export type EnemyKind = "snail" | "snake" | "spider" | "eagle";
+//   "goldpig"… 黄金の豚（レア）。1ステージに1匹だけ。画面を横切るように飛ぶ。
+//              少し硬く、倒すとボムを落とし、得点は通常の2倍
+export type EnemyKind = "snail" | "snake" | "spider" | "eagle" | "goldpig";
 
 // ボスの種類
 //   "gorilla"        … ゴリラ（ステージ1）。腕足が動く
@@ -73,6 +75,9 @@ const STAGE1: Stage = {
     { time: 3.8, kind: "snail", x: 0.6 },
     { time: 4.2, kind: "snail", x: 0.8 },
 
+    // レアな黄金の豚（このステージに1匹だけ。左から飛んでくる）
+    { time: 5.0, kind: "goldpig", x: 0.0 },
+
     // 中盤：横にくねる蛇を混ぜる
     { time: 6.0, kind: "snake", x: 0.25 },
     { time: 6.0, kind: "snake", x: 0.75 },
@@ -120,6 +125,9 @@ const STAGE2: Stage = {
     { time: 6.5, kind: "spider", x: 0.7 },
     { time: 7.5, kind: "eagle", x: 0.2 },
     { time: 8.0, kind: "eagle", x: 0.8 },
+
+    // レアな黄金の豚（このステージに1匹だけ。右から飛んでくる）
+    { time: 9.0, kind: "goldpig", x: 1.0 },
 
     // 中盤：混ぜる
     { time: 9.5, kind: "snake", x: 0.4 },
