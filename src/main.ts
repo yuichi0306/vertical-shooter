@@ -1,10 +1,11 @@
 // ===================================================================
-// ステップ8: タイトル画面・スコア・ハイスコア保存
-//   - タイトル → ゲーム → 決着 → タイトル の流れ
-//   - スコアを加算、ハイスコアをブラウザ(localStorage)に保存
+// ステップ9: 効果音と爆発エフェクト（演出）
+//   - ショット／爆発／被弾の効果音（Web Audioで生成）
+//   - 敵やボスを倒したときに破片が飛び散るエフェクト
 // ===================================================================
 
 import { STAGE_TIMELINE, STAGE_DURATION, type EnemyKind } from "./stage";
+import { initAudio, playShot, playExplosion, playHit } from "./audio";
 
 // ゲーム内部の解像度（座標はすべてこのサイズを基準に書く）
 const WIDTH = 480;
@@ -24,6 +25,7 @@ const ctx = canvas.getContext("2d")!;
 const keys = new Set<string>();
 
 window.addEventListener("keydown", (e) => {
+  initAudio(); // 最初のキー操作で音を有効化（ブラウザの制限対策）
   keys.add(e.code);
   // 矢印キーやスペースで画面がスクロールしないように
   if (
@@ -129,6 +131,38 @@ const ITEM_SPEED = 90; // アイテムが下りる速さ（px/秒）
 
 type Item = { x: number; y: number };
 const items: Item[] = [];
+
+// -------------------------------------------------------------------
+// 爆発エフェクト（飛び散る破片）
+// -------------------------------------------------------------------
+type Particle = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number; // 残り寿命（秒）
+  maxLife: number; // 寿命の最大値（透明度の計算に使う）
+  color: string;
+};
+const particles: Particle[] = [];
+
+// 指定位置で破片をまき散らす
+function spawnExplosion(x: number, y: number, color: string, count: number): void {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 40 + Math.random() * 160;
+    const life = 0.3 + Math.random() * 0.4;
+    particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life,
+      maxLife: life,
+      color,
+    });
+  }
+}
 
 // -------------------------------------------------------------------
 // 敵の弾（ボスが撃ってくる弾。自機に当たる）
@@ -259,6 +293,8 @@ const BOSS_PATTERNS = [bossPatternAimed, bossPatternFan];
 function damagePlayer(): void {
   player.lives -= 1;
   player.power = Math.max(1, player.power - 1); // 被弾で1段階ダウン
+  spawnExplosion(player.x, player.y, "#5cff9d", 24);
+  playHit();
   if (player.lives <= 0) {
     gameState = "gameover";
     resultLock = 0.8; // 誤リスタート防止
@@ -280,6 +316,7 @@ function resetGame(): void {
   enemies.length = 0;
   items.length = 0;
   enemyBullets.length = 0;
+  particles.length = 0;
   boss = null;
   bossSpawned = false;
   stageTime = 0;
@@ -322,6 +359,17 @@ function update(dt: number): void {
       s.y -= HEIGHT;
       s.x = Math.random() * WIDTH;
     }
+  }
+
+  // --- 爆発の破片（どの状態でも動かし続ける）---
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= 0.96; // だんだん減速
+    p.vy *= 0.96;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
   }
 
   // タイトル画面：キーでゲーム開始
@@ -370,6 +418,7 @@ function update(dt: number): void {
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
   if (isDown("KeyZ", "Space") && player.fireCooldown <= 0) {
     fireShot();
+    playShot();
     player.fireCooldown = FIRE_INTERVAL;
   }
 
@@ -418,6 +467,8 @@ function update(dt: number): void {
           enemies.splice(ei, 1); // 敵を倒した
           defeated += 1;
           score += SCORE_ENEMY;
+          spawnExplosion(e.x, e.y, e.kind === "zigzag" ? "#ff9f43" : "#ff5c7a", 14);
+          playExplosion();
           // 一定確率でパワーアップアイテムを落とす
           if (Math.random() < ITEM_DROP_RATE) {
             items.push({ x: e.x, y: e.y });
@@ -497,6 +548,8 @@ function update(dt: number): void {
         bullets.splice(bi, 1);
         boss.hp -= 1;
         if (boss.hp <= 0) {
+          spawnExplosion(boss.x, boss.y, "#b15cff", 60); // 大きな爆発
+          playExplosion();
           boss = null;
           score += SCORE_BOSS;
           gameState = "clear";
@@ -605,6 +658,14 @@ function render(): void {
     ctx.arc(eb.x, eb.y, EBULLET_RADIUS, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  // 爆発の破片（寿命に応じてだんだん透明に）
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1; // 透明度を元に戻す
 
   // 自機のショット
   ctx.fillStyle = "#fff36b";
