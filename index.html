@@ -36,10 +36,29 @@
         box-shadow: 0 0 40px rgba(80, 120, 255, 0.3);
         touch-action: none; /* 指の操作をゲームだけに使う */
       }
+      /* 画面のすみに置く「あそびかた」リンク（別タブで説明書を開く） */
+      #help-link {
+        position: fixed;
+        top: 10px;
+        right: 12px;
+        z-index: 10;
+        text-decoration: none;
+        color: #5cff9d;
+        font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", sans-serif;
+        font-size: 13px;
+        font-weight: bold;
+        padding: 6px 12px;
+        border: 1.5px solid rgba(92, 255, 157, 0.6);
+        border-radius: 999px;
+        background: rgba(10, 10, 20, 0.55);
+        backdrop-filter: blur(2px);
+      }
+      #help-link:hover { background: rgba(92, 255, 157, 0.15); }
     </style>
   </head>
   <body>
     <canvas id="game" width="480" height="640"></canvas>
+    <a id="help-link" href="manual.html" target="_blank">📖 あそびかた</a>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

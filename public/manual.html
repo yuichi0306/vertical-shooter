@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VERTICAL SHOOTER ─ あそびかた</title>
+    <style>
+      :root {
+        --bg: #0a0a14;
+        --panel: #12131f;
+        --panel2: #171a2b;
+        --line: #2a2f48;
+        --text: #e8ecff;
+        --muted: #aab2d5;
+        --green: #5cff9d;
+        --yellow: #fff36b;
+        --pink: #ff5cc8;
+        --blue: #5cd6ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(1200px 600px at 50% -10%, #16213f 0%, var(--bg) 60%);
+        color: var(--text);
+        font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic",
+          "Meiryo", sans-serif;
+        line-height: 1.8;
+        padding: 24px 16px 64px;
+      }
+      .wrap { max-width: 760px; margin: 0 auto; }
+      h1 {
+        font-family: monospace;
+        color: var(--green);
+        text-align: center;
+        font-size: 30px;
+        letter-spacing: 2px;
+        margin: 8px 0 2px;
+        text-shadow: 0 0 16px rgba(92, 255, 157, 0.4);
+      }
+      .sub { text-align: center; color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+      .btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 26px; }
+      .btn {
+        display: inline-block; text-decoration: none; font-weight: bold;
+        padding: 11px 18px; border-radius: 10px; font-size: 15px;
+      }
+      .btn-play { background: var(--green); color: #06210f; }
+      .btn-pdf { background: transparent; color: var(--blue); border: 1.5px solid var(--blue); }
+      h2 {
+        font-size: 20px; margin: 30px 0 12px; padding-left: 12px;
+        border-left: 5px solid var(--green);
+      }
+      section {
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: 14px; padding: 4px 20px 18px; margin-bottom: 18px;
+      }
+      table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 15px; }
+      th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; }
+      th { background: var(--panel2); color: var(--green); white-space: nowrap; }
+      .note {
+        background: rgba(92, 214, 255, 0.08); border: 1px solid rgba(92, 214, 255, 0.35);
+        border-radius: 10px; padding: 10px 14px; margin: 12px 0; font-size: 14px; color: var(--muted);
+      }
+      .warn {
+        background: rgba(255, 92, 200, 0.08); border: 1px solid rgba(255, 92, 200, 0.35);
+        border-radius: 10px; padding: 10px 14px; margin: 12px 0; font-size: 14px;
+      }
+      strong { color: var(--yellow); }
+      ol, ul { padding-left: 22px; }
+      li { margin: 6px 0; }
+      .center { text-align: center; }
+      footer { text-align: center; color: var(--muted); margin-top: 30px; font-size: 13px; }
+      a { color: var(--blue); }
+
+      /* 印刷／PDF書き出しのときは、白基調の読みやすい配色にする */
+      @page { margin: 12mm; }
+      @media print {
+        body { background: #fff; color: #1c2230; padding: 0; }
+        .btns { display: none; }
+        h1 { color: #188a4e; text-shadow: none; }
+        .sub, .url { color: #555; }
+        section {
+          background: #fff; border: 1px solid #c9d2e0;
+          break-inside: avoid; page-break-inside: avoid;
+        }
+        h2 { color: #1c2230; border-left-color: #188a4e; }
+        th {
+          background: #e7f8ee; color: #188a4e;
+          -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        th, td { border-color: #c9d2e0; }
+        .note {
+          background: #e9f4fc; border-color: #7cc0ea; color: #333;
+          -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .warn {
+          background: #fdeaf5; border-color: #e98fc5; color: #333;
+          -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        strong { color: #b8860b; }
+        a { color: #1a73c2; }
+        footer { color: #666; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>VERTICAL SHOOTER</h1>
+      <p class="sub">あそびかた（プレイヤー説明書）</p>
+
+      <div class="btns">
+        <a class="btn btn-play" href="./">▶ ゲームをはじめる</a>
+        <a class="btn btn-pdf" href="manual.pdf" target="_blank">📄 PDFでダウンロード</a>
+      </div>
+
+      <section>
+        <h2>🎯 ゲームの目的</h2>
+        <ul>
+          <li>敵をたおしながら進み、各ステージの最後に出る<strong>ボス</strong>を倒す</li>
+          <li><strong>ステージ1 → ステージ2</strong> をクリアすると「STAGE CLEAR！」</li>
+          <li>できるだけ<strong>高いスコア</strong>をめざそう（ハイスコアはブラウザに自動保存）</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>🕹 そうさ方法</h2>
+        <p><b>パソコン（キーボード）</b></p>
+        <table>
+          <tr><th>やること</th><th>キー</th></tr>
+          <tr><td>移動</td><td>矢印キー ↑↓←→ または W A S D</td></tr>
+          <tr><td>ショット（弾を撃つ）</td><td>Z または スペース</td></tr>
+          <tr><td>ボム（緊急回避）</td><td>X または Shift</td></tr>
+          <tr><td>スタート／タイトルへ戻る</td><td>Z または スペース</td></tr>
+        </table>
+        <p><b>スマートフォン（タッチ）</b></p>
+        <ul>
+          <li><strong>左下の丸いパッド</strong>：指で押した向きに移動（倒すほど速い）</li>
+          <li><strong>右下の「ショット」ボタン</strong>：押している間ずっと連射</li>
+          <li><strong>右下の「ボム」ボタン</strong>：タップでボム発動（残り数つき）</li>
+          <li><strong>スタート／タイトルへ戻る</strong>：画面をタップ</li>
+        </ul>
+        <div class="note">💡 最初に1回操作すると、音（BGM・効果音）が鳴り始めます。</div>
+      </section>
+
+      <section>
+        <h2>👾 自機（プレイヤー）について</h2>
+        <ul>
+          <li>自機は <strong>頭がキリン・体がカメ</strong>のふしぎな生きもの</li>
+          <li><strong>残機（ライフ）は3機</strong>。敵や敵の弾に当たると1機減る</li>
+          <li>被弾すると<strong>ショットのパワーが1段階ダウン</strong></li>
+          <li>やられた後はしばらく<strong>点滅して無敵</strong>（その間は当たらない）</li>
+          <li>残機が0になると <strong>GAME OVER</strong></li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>💪 パワーアップ（キャベツ🥬）</h2>
+        <p>敵を倒すと、ときどきキャベツが落ちます。拾うとショットが強くなります（最大3段階）。</p>
+        <table>
+          <tr><th>段階</th><th>ショット</th></tr>
+          <tr><td>1</td><td>正面に1発</td></tr>
+          <tr><td>2</td><td>2発を並べて発射</td></tr>
+          <tr><td>3</td><td>正面＋左右ななめの3方向に発射（最強）</td></tr>
+        </table>
+        <div class="warn">⚠️ 被弾すると1段階下がるので、当たらないように！</div>
+      </section>
+
+      <section>
+        <h2>💣 ボム（緊急回避）</h2>
+        <ul>
+          <li>画面内の<strong>ザコ敵を一掃</strong>＋飛んでいる<strong>敵の弾を全部消す</strong></li>
+          <li>発動後、約1.5秒<strong>無敵</strong>になる</li>
+          <li><strong>ボスには大ダメージ</strong></li>
+          <li>最初は<strong>3発</strong>（自動では増えない）。<strong>黄金の豚</strong>を倒すと補充できる</li>
+        </ul>
+        <div class="warn">⚠️ ボムは<strong>1回使うごとに −200点</strong>。本当にピンチな場面で使いましょう。</div>
+      </section>
+
+      <section>
+        <h2>🐾 出てくる敵</h2>
+        <p><b>ステージ1「夜空」</b></p>
+        <table>
+          <tr><th>敵</th><th>とくちょう</th></tr>
+          <tr><td>🐌 カタツムリ</td><td>ほとんど動かず、ゆっくり下りてくる。かんたん</td></tr>
+          <tr><td>🐍 蛇</td><td>左右にくねりながら下り、ときどき自機を狙って弾を撃つ</td></tr>
+          <tr><td>🕷 蜘蛛</td><td>糸でビヨンビヨン上下に伸び縮みしながら下りる</td></tr>
+        </table>
+        <p><b>ステージ2「地球の空」</b>（カタツムリは出ません）</p>
+        <table>
+          <tr><th>敵</th><th>とくちょう</th></tr>
+          <tr><td>🐍 蛇 / 🕷 蜘蛛</td><td>ステージ1と同じ</td></tr>
+          <tr><td>🦅 鷲</td><td>ふらふらランダムに飛び回りながら、自機へ弾を撃ってくる</td></tr>
+        </table>
+        <p><b>✨ レア敵：黄金の豚🐷（各ステージに1匹だけ！）</b></p>
+        <ul>
+          <li>金色のブタが<strong>画面を横切るように飛んで</strong>くる</li>
+          <li>少し硬い（<strong>6発</strong>）。見つけたら集中攻撃！</li>
+          <li>倒すと<strong>ボムを必ず落とす</strong>＋<strong>得点が通常の2倍</strong></li>
+          <li>画面の外へ逃げる前に倒すのがコツ</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>👹 ボス</h2>
+        <ul>
+          <li><strong>ステージ1：ゴリラ</strong> … 腕と足を振って動き、弾をばらまく</li>
+          <li><strong>ステージ2：機械のゴリラ</strong> … とても硬く、攻撃が多彩（狙い撃ち・扇うち・全方位・2列連射・回転うずまき弾）。左右だけでなく<strong>前後にも動いて</strong>せまる</li>
+        </ul>
+        <div class="warn">🔥 <strong>怒りモード</strong>：HPが半分以下になると、体が赤く光って攻撃が激しくなる。最後まで気をぬかずに！</div>
+      </section>
+
+      <section>
+        <h2>🏆 スコアのしくみ</h2>
+        <table>
+          <tr><th>できごと</th><th>点数</th></tr>
+          <tr><td>ザコ敵を倒す</td><td>＋100点</td></tr>
+          <tr><td>黄金の豚を倒す</td><td>＋200点（2倍）</td></tr>
+          <tr><td>ボスを倒す</td><td>＋5000点</td></tr>
+          <tr><td>ボムを使う</td><td>−200点（1回ごと）</td></tr>
+          <tr><td>クリア時、残機が満タン(3)から1減るごと</td><td>−500点</td></tr>
+        </table>
+        <ul>
+          <li>スコアは<strong>0点より下にはならない</strong></li>
+          <li><strong>残機を多く残してクリア</strong>するほど高得点。<strong>ボムを使いすぎない</strong>のもコツ</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>💡 上達のヒント</h2>
+        <ol>
+          <li><strong>まずパワーアップ</strong>：キャベツを拾って3段階にすると一気に戦いやすい</li>
+          <li><strong>無敵時間を活用</strong>：被弾直後の点滅中は当たらない。慌てず立て直そう</li>
+          <li><strong>黄金の豚は最優先</strong>：硬いけど、倒せばボム＋高得点</li>
+          <li><strong>ボムは本当のピンチに</strong>：減点があるぶん、敵弾に囲まれた時など「死ぬよりマシ」な場面で</li>
+          <li><strong>ハイスコア狙いは残機温存</strong>：クリア時の残機が多いほど減点が少ない</li>
+        </ol>
+      </section>
+
+      <div class="btns">
+        <a class="btn btn-play" href="./">▶ ゲームをはじめる</a>
+      </div>
+      <footer>たのしんでね！🎮</footer>
+    </div>
+  </body>
+</html>
