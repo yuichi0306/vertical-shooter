@@ -155,13 +155,32 @@ const NORMAL2_LEAD = [74, 0, 76, 78, 81, 0, 78, 0, 76, 0, 78, 81, 83, 0, 81, 0];
 const BOSS2_BASS = [40, 40, 52, 40, 36, 36, 48, 36, 43, 43, 55, 43, 38, 38, 50, 38];
 const BOSS2_LEAD = [76, 79, 83, 0, 84, 0, 83, 79, 79, 83, 84, 0, 81, 78, 74, 0];
 
-// 各曲の設定（楽譜・ベースの波形・1ステップの長さ）。ステップが短い＝速い曲
-type TrackDef = { bass: number[]; lead: number[]; bassWave: OscillatorType; stepDur: number };
+// 通常BGM（ステージ3）：優雅でゆったり（ト長調 G-Em-C-D のなめらかな進行・遅め）
+const NORMAL3_BASS = [43, 0, 50, 0, 40, 0, 47, 0, 48, 0, 55, 0, 50, 0, 57, 0];
+const NORMAL3_LEAD = [79, 0, 76, 78, 76, 0, 74, 0, 72, 0, 74, 76, 74, 0, 0, 0];
+// ボス戦BGM（ステージ3）：コミカルで弾む（低高に跳ねるベース＋おどけたメロディ）
+const BOSS3_BASS = [36, 48, 36, 48, 41, 53, 41, 53, 40, 52, 40, 52, 43, 55, 43, 55];
+const BOSS3_LEAD = [72, 74, 76, 0, 79, 0, 76, 0, 71, 72, 74, 0, 67, 0, 0, 0];
+
+// 各曲の設定（楽譜・ベースの波形・メロディの波形・1ステップの長さ）。
+// leadWave 省略時は square（従来どおり）。triangle にすると柔らかい音色になる。
+// ステップが短い＝速い曲
+type TrackDef = {
+  bass: number[];
+  lead: number[];
+  bassWave: OscillatorType;
+  stepDur: number;
+  leadWave?: OscillatorType;
+};
 const TRACKS = {
   normal: { bass: NORMAL_BASS, lead: NORMAL_LEAD, bassWave: "triangle", stepDur: 0.21 },
   boss: { bass: BOSS_BASS, lead: BOSS_LEAD, bassWave: "sawtooth", stepDur: 0.16 },
   normal2: { bass: NORMAL2_BASS, lead: NORMAL2_LEAD, bassWave: "triangle", stepDur: 0.165 },
   boss2: { bass: BOSS2_BASS, lead: BOSS2_LEAD, bassWave: "sawtooth", stepDur: 0.135 },
+  // ステージ3：優雅な道中（柔らかい triangle のメロディ・ゆったり）
+  normal3: { bass: NORMAL3_BASS, lead: NORMAL3_LEAD, bassWave: "triangle", stepDur: 0.26, leadWave: "triangle" },
+  // ステージ3：コミカルなボス戦（弾む square のメロディ・テンポよく）
+  boss3: { bass: BOSS3_BASS, lead: BOSS3_LEAD, bassWave: "square", stepDur: 0.15, leadWave: "square" },
 } satisfies Record<string, TrackDef>;
 
 const MUSIC_VOL = 0.35; // BGM全体の音量（効果音より控えめに）
@@ -205,12 +224,12 @@ function musicTone(
 
 // 1ステップぶん（ベース＋メロディ）を予約する
 function playStep(track: MusicTrack, step: number, time: number, stepDur: number): void {
-  const def = TRACKS[track];
+  const def: TrackDef = TRACKS[track];
   if (def.bass[step]) {
     musicTone(midiToFreq(def.bass[step]), time, stepDur * 0.9, def.bassWave, 0.15);
   }
   if (def.lead[step]) {
-    musicTone(midiToFreq(def.lead[step]), time, stepDur * 0.8, "square", 0.1);
+    musicTone(midiToFreq(def.lead[step]), time, stepDur * 0.8, def.leadWave ?? "square", 0.1);
   }
 }
 

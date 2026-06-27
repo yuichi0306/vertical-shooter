@@ -1838,15 +1838,6 @@ function drawJellyfish(cx: number, cy: number, age: number): void {
 
   const squash = Math.sin(age * 3) * 0.12; // かさがふわふわ伸び縮み
 
-  // ほんのり光るオーラ（半透明のクラゲらしさ）
-  ctx.save();
-  ctx.globalAlpha = 0.18;
-  ctx.fillStyle = "#ff9ed8";
-  ctx.beginPath();
-  ctx.arc(0, 0, 20, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
   // 触手（下に揺れる細いひも）
   ctx.strokeStyle = "rgba(255, 158, 216, 0.85)";
   ctx.lineWidth = 2;

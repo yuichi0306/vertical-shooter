@@ -169,8 +169,8 @@ const STAGE3: Stage = {
   theme: "sea",
   boss: "scubaGorilla",
   duration: 19.0,
-  normalMusic: "normal2",
-  bossMusic: "boss2",
+  normalMusic: "normal3", // 優雅でゆったりした道中曲
+  bossMusic: "boss3", // コミカルで弾むボス曲
   timeline: [
     // 序盤：クラゲ（くねりながら撃つ）で肩慣らし
     { time: 1.0, kind: "jellyfish", x: 0.3 },
