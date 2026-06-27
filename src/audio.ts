@@ -81,15 +81,15 @@ function noise(dur: number, vol: number): void {
 export function playShot(power = 1): void {
   if (power >= 3) {
     // 最大強化：低い層を重ねた、太く厚みのある「ドュン」
-    tone(740, 0.09, "square", 0.05, 220);
-    tone(370, 0.09, "sawtooth", 0.04, 140);
+    tone(740, 0.09, "square", 0.03, 220);
+    tone(370, 0.09, "sawtooth", 0.024, 140);
   } else if (power === 2) {
     // 中間：倍音を足したにぎやかな「ピュン」
-    tone(820, 0.08, "square", 0.05, 260);
-    tone(1230, 0.05, "square", 0.025, 500);
+    tone(820, 0.08, "square", 0.03, 260);
+    tone(1230, 0.05, "square", 0.015, 500);
   } else {
     // 通常：高めの短い「ピッ」
-    tone(880, 0.07, "square", 0.05, 300);
+    tone(880, 0.07, "square", 0.03, 300);
   }
 }
 
