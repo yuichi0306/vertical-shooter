@@ -52,7 +52,13 @@ import type { MusicTrack } from "./audio";
 //   time … ステージ開始からの秒数
 //   kind … 敵の種類
 //   x    … 横位置（0.0 = 左端、0.5 = 中央、1.0 = 右端）
-export type SpawnEvent = { time: number; kind: EnemyKind; x: number };
+//   from … 出現方向。省略＝"top"（上から下りる）／"bottom"（下から上る・ステージ2以降）
+export type SpawnEvent = {
+  time: number;
+  kind: EnemyKind;
+  x: number;
+  from?: "top" | "bottom";
+};
 
 // 1つのステージのまとまり
 //   name     … 画面に出すステージ名
@@ -155,15 +161,21 @@ const STAGE2: Stage = {
     { time: 11.0, kind: "eagle", x: 0.5 },
     { time: 11.0, kind: "spider", x: 0.5 },
 
+    // 下から上ってくる鷲（ステージ2から登場）
+    { time: 11.5, kind: "eagle", x: 0.3, from: "bottom" },
+    { time: 11.5, kind: "eagle", x: 0.7, from: "bottom" },
+
     // 終盤：山場
     { time: 12.5, kind: "snake", x: 0.2 },
     { time: 12.8, kind: "eagle", x: 0.5 },
     { time: 13.1, kind: "snake", x: 0.8 },
+    { time: 13.5, kind: "snake", x: 0.5, from: "bottom" }, // 下からくねって上る
     { time: 14.0, kind: "spider", x: 0.3 },
     { time: 14.0, kind: "spider", x: 0.7 },
     { time: 14.5, kind: "eagle", x: 0.5 },
     { time: 15.5, kind: "eagle", x: 0.25 },
     { time: 15.5, kind: "eagle", x: 0.75 },
+    { time: 15.5, kind: "eagle", x: 0.5, from: "bottom" },
     { time: 16.0, kind: "snake", x: 0.5 },
   ],
 };
@@ -201,16 +213,24 @@ const STAGE3: Stage = {
     { time: 10.5, kind: "squid", x: 0.3 },
     { time: 10.5, kind: "squid", x: 0.7 },
 
+    // 海の中らしく、下から上ってくる魚や生きもの
+    { time: 11.0, kind: "jellyfish", x: 0.4, from: "bottom" },
+    { time: 11.0, kind: "squid", x: 0.6, from: "bottom" },
+
     // 中盤〜終盤：3種を混ぜて山場へ
     { time: 12.0, kind: "jellyfish", x: 0.5 },
     { time: 12.5, kind: "tuna", x: 0.2 },
     { time: 12.8, kind: "tuna", x: 0.8 },
+    { time: 13.0, kind: "tuna", x: 0.2, from: "bottom" }, // 下から突き上げる（中央は避ける）
     { time: 13.5, kind: "squid", x: 0.5 },
     { time: 14.5, kind: "jellyfish", x: 0.3 },
     { time: 14.5, kind: "jellyfish", x: 0.7 },
+    { time: 15.0, kind: "jellyfish", x: 0.5, from: "bottom" },
     { time: 15.5, kind: "tuna", x: 0.5 },
     { time: 16.0, kind: "squid", x: 0.25 },
     { time: 16.0, kind: "squid", x: 0.75 },
+    { time: 16.5, kind: "tuna", x: 0.3, from: "bottom" },
+    { time: 16.5, kind: "tuna", x: 0.7, from: "bottom" },
     { time: 17.0, kind: "tuna", x: 0.35 },
     { time: 17.0, kind: "tuna", x: 0.65 },
   ],

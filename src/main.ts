@@ -416,7 +416,7 @@ const OPTION_OFFSET_Y = -6; // 自機からの定位置（少し上）
 const OPTION_FOLLOW = 9; // 追従のなめらかさ（大きいほど速く追いつく）
 const LASER_SPEED = 760; // レーザーが上へ進む速さ（px/秒）。通常弾より速い
 const optionTurtle = { x: player.x, y: player.y, active: false };
-const ITEM_DROP_RATE = 0.1; // 敵撃破時にアイテムが出る確率（0.1 = 10%）
+const ITEM_DROP_RATE = 0.12; // 敵撃破時にアイテムが出る確率（0.12 = 12%）
 const ITEM_RADIUS = 10; // アイテムの大きさ／当たり判定
 const ITEM_SPEED = 90; // アイテムが下りる速さ（px/秒）
 
@@ -546,6 +546,7 @@ const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
 // fireTimer … 次に弾を撃つまでの残り秒（蛇と鷲が使う）
 // vx/vy … 1秒あたりの移動量（鷲のふらふら移動に使う）
 // wanderTimer … 次にふらふらの向きを変えるまでの残り秒（鷲だけが使う）
+// dir … 進む向き。+1=上から下へ（通常）／-1=下から上へ（ステージ2以降の下から出現）
 type Enemy = {
   x: number;
   y: number;
@@ -557,6 +558,7 @@ type Enemy = {
   vx: number;
   vy: number;
   wanderTimer: number;
+  dir: number;
 };
 const enemies: Enemy[] = [];
 
@@ -564,10 +566,13 @@ const enemies: Enemy[] = [];
 let stageTime = 0;
 let nextEventIndex = 0;
 
-// 敵を1体作る
-function spawnEnemy(kind: EnemyKind, xRatio: number): void {
+// 敵を1体作る。from="bottom" のときは画面の下から上へ向かって出る。
+function spawnEnemy(kind: EnemyKind, xRatio: number, from: "top" | "bottom" = "top"): void {
+  // 横切る黄金の豚・エンジェルは「下から」を無視（左右から登場するため）
+  const dir = from === "bottom" && kind !== "goldpig" && kind !== "angel" ? -1 : 1;
   let x = xRatio * WIDTH;
-  let y = -ENEMY_RADIUS;
+  // dir が -1（下から）なら画面下の外側に、+1（上から）なら画面上の外側に出す
+  let y = dir < 0 ? HEIGHT + ENEMY_RADIUS : -ENEMY_RADIUS;
   // 発射タイミングを少しずらして、全部が同時に撃たないようにする
   let fireTimer = SNAKE_FIRE_INTERVAL * (0.6 + Math.random() * 0.8);
   let hp = ENEMY_HP;
@@ -577,7 +582,7 @@ function spawnEnemy(kind: EnemyKind, xRatio: number): void {
     // イカは鷲と同じ動き（ふらふら動いて撃つ）
     hp = EAGLE_HP;
     fireTimer = EAGLE_FIRE_INTERVAL * (0.5 + Math.random());
-    vy = EAGLE_FALL_SPEED; // 最初はまっすぐ下りる
+    vy = EAGLE_FALL_SPEED * dir; // 進む向き（下から出たら上へ）
   } else if (kind === "goldpig") {
     hp = GOLDPIG_HP;
     // x=0 なら左から右へ、x=1 なら右から左へ、画面の外から飛んでくる
@@ -592,7 +597,7 @@ function spawnEnemy(kind: EnemyKind, xRatio: number): void {
     x = fromLeft ? -ENEMY_RADIUS : WIDTH + ENEMY_RADIUS;
     y = ANGEL_Y;
   }
-  enemies.push({ x, y, hp, kind, baseX: x, age: 0, fireTimer, vx, vy, wanderTimer: 0 });
+  enemies.push({ x, y, hp, kind, baseX: x, age: 0, fireTimer, vx, vy, wanderTimer: 0, dir });
 }
 
 // 自機のショットを撃つ。強化段階で弾の数と広がりが変わる。
@@ -1148,7 +1153,7 @@ function update(dt: number): void {
     stage.timeline[nextEventIndex].time <= stageTime
   ) {
     const ev = stage.timeline[nextEventIndex];
-    spawnEnemy(ev.kind, ev.x);
+    spawnEnemy(ev.kind, ev.x, ev.from);
     nextEventIndex += 1;
   }
 
@@ -1156,11 +1161,11 @@ function update(dt: number): void {
   for (const e of enemies) {
     e.age += dt;
     if (e.kind === "snail") {
-      // カタツムリ：ほとんど動かず、ゆっくり下りるだけ
-      e.y += SNAIL_SPEED * dt;
+      // カタツムリ：ほとんど動かず、ゆっくり下りる（dir=-1なら上る）だけ
+      e.y += SNAIL_SPEED * dt * e.dir;
     } else if (e.kind === "snake" || e.kind === "jellyfish") {
-      // 蛇・クラゲ：基準位置を中心に、サイン波で左右にくねりながら下りる
-      e.y += ENEMY_SPEED * dt;
+      // 蛇・クラゲ：基準位置を中心に、サイン波で左右にくねりながら下りる（dir=-1なら上る）
+      e.y += ENEMY_SPEED * dt * e.dir;
       e.x = e.baseX + Math.sin(e.age * SNAKE_FREQ) * SNAKE_AMPLITUDE;
       // 画面内にいる間はたまに自機へ弾を撃つ
       e.fireTimer -= dt;
@@ -1170,12 +1175,12 @@ function update(dt: number): void {
         e.fireTimer = SNAKE_FIRE_INTERVAL;
       }
     } else if (e.kind === "tuna") {
-      // マグロ：まっすぐ下へ、ただし速い（黄金の豚の2倍速）
-      e.y += TUNA_SPEED * dt;
+      // マグロ：まっすぐ進む、ただし速い（黄金の豚の2倍速）。dir=-1なら下から上へ
+      e.y += TUNA_SPEED * dt * e.dir;
     } else if (e.kind === "spider") {
       // 蜘蛛：糸で上下に伸び縮みしながら（縦に動いて）下りる。
       // 速さをサイン波で増減させ、時には少し上に戻る＝縦のビヨンビヨン感を出す
-      e.y += SPIDER_SPEED * (0.6 + Math.sin(e.age * SPIDER_FREQ)) * dt;
+      e.y += SPIDER_SPEED * (0.6 + Math.sin(e.age * SPIDER_FREQ)) * dt * e.dir;
     } else if (e.kind === "goldpig") {
       // 黄金の豚：画面を横切りながら、ふわふわ上下に揺れて飛ぶ（横に出たら退場）
       e.x += e.vx * dt;
@@ -1190,7 +1195,8 @@ function update(dt: number): void {
       e.wanderTimer -= dt;
       if (e.wanderTimer <= 0) {
         e.vx = (Math.random() * 2 - 1) * EAGLE_WANDER_SPEED;
-        e.vy = EAGLE_FALL_SPEED * (0.4 + Math.random() * 1.2);
+        // 縦は必ず進行方向へ（dir=+1なら下り、dir=-1なら上る）
+        e.vy = EAGLE_FALL_SPEED * (0.4 + Math.random() * 1.2) * e.dir;
         e.wanderTimer = EAGLE_WANDER_MIN + Math.random() * (EAGLE_WANDER_MAX - EAGLE_WANDER_MIN);
       }
       e.x += e.vx * dt;
@@ -1286,11 +1292,12 @@ function update(dt: number): void {
     }
   }
 
-  // --- 画面の外（下・左右）に出た敵を消す（横切る黄金の豚は左右で退場）---
+  // --- 画面の外（上・下・左右）に出た敵を消す（横切る黄金の豚は左右で退場）---
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
     if (
       e.y > HEIGHT + ENEMY_RADIUS ||
+      e.y < -ENEMY_RADIUS - 30 || // 下から上って画面の上へ抜けた敵
       e.x < -ENEMY_RADIUS - 30 ||
       e.x > WIDTH + ENEMY_RADIUS + 30
     ) {
@@ -2201,15 +2208,26 @@ function drawAngel(cx: number, cy: number, age: number): void {
 
 // 敵を種類に応じた姿で描く
 function drawEnemy(e: Enemy): void {
-  if (e.kind === "snail") drawSnail(e.x, e.y, e.age);
-  else if (e.kind === "snake") drawSnake(e.x, e.y, e.age);
-  else if (e.kind === "spider") drawSpider(e.x, e.y, e.age);
-  else if (e.kind === "eagle") drawEagle(e.x, e.y, e.age);
-  else if (e.kind === "jellyfish") drawJellyfish(e.x, e.y, e.age);
-  else if (e.kind === "tuna") drawTuna(e.x, e.y, e.age);
-  else if (e.kind === "squid") drawSquid(e.x, e.y, e.age);
-  else if (e.kind === "angel") drawAngel(e.x, e.y, e.age);
-  else drawGoldPig(e.x, e.y, e.age);
+  // 下から上る敵（dir<0）は絵を上下に反転して進行方向（上）を向かせる。
+  // ただしクラゲ・イカは元から上向きが自然なので反転しない。
+  const flip = e.dir < 0 && e.kind !== "jellyfish" && e.kind !== "squid";
+  if (flip) {
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.scale(1, -1);
+  }
+  const cx = flip ? 0 : e.x;
+  const cy = flip ? 0 : e.y;
+  if (e.kind === "snail") drawSnail(cx, cy, e.age);
+  else if (e.kind === "snake") drawSnake(cx, cy, e.age);
+  else if (e.kind === "spider") drawSpider(cx, cy, e.age);
+  else if (e.kind === "eagle") drawEagle(cx, cy, e.age);
+  else if (e.kind === "jellyfish") drawJellyfish(cx, cy, e.age);
+  else if (e.kind === "tuna") drawTuna(cx, cy, e.age);
+  else if (e.kind === "squid") drawSquid(cx, cy, e.age);
+  else if (e.kind === "angel") drawAngel(cx, cy, e.age);
+  else drawGoldPig(cx, cy, e.age);
+  if (flip) ctx.restore();
 }
 
 // ボム補充アイテム（黄金の豚が落とす）の姿。(cx, cy) が中心。
