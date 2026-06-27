@@ -165,6 +165,11 @@ const BOSS2_LEAD = [76, 79, 83, 0, 84, 0, 83, 79, 79, 83, 84, 0, 81, 78, 74, 0];
 // 通常BGM（ステージ3）：優雅でゆったり（ト長調 G-Em-C-D のなめらかな進行・遅め）
 const NORMAL3_BASS = [43, 0, 50, 0, 40, 0, 47, 0, 48, 0, 55, 0, 50, 0, 57, 0];
 const NORMAL3_LEAD = [79, 0, 76, 78, 76, 0, 74, 0, 72, 0, 74, 76, 74, 0, 0, 0];
+// タイトルBGM：壮大なファンファーレ（スターウォーズ風／変ロ長調）。
+// 金管のように高らかに鳴る勇ましいメロディ＋どっしりした低音。ゆったり堂々と。
+//   メロディ：シ♭シ♭シ♭（三連符風の入り）→ ファ↑ → シ♭↑ → ラ ソ ファ → ド↑ → シ♭
+const TITLE_BASS = [34, 46, 41, 46, 34, 46, 41, 46, 39, 51, 41, 53, 34, 46, 41, 41];
+const TITLE_LEAD = [70, 70, 70, 77, 0, 82, 0, 0, 81, 79, 77, 84, 0, 0, 82, 0];
 // ボス戦BGM（ステージ3）：コミカルで弾む（低高に跳ねるベース＋おどけたメロディ）
 const BOSS3_BASS = [36, 48, 36, 48, 41, 53, 41, 53, 40, 52, 40, 52, 43, 55, 43, 55];
 const BOSS3_LEAD = [72, 74, 76, 0, 79, 0, 76, 0, 71, 72, 74, 0, 67, 0, 0, 0];
@@ -188,6 +193,8 @@ const TRACKS = {
   normal3: { bass: NORMAL3_BASS, lead: NORMAL3_LEAD, bassWave: "triangle", stepDur: 0.26, leadWave: "triangle" },
   // ステージ3：コミカルなボス戦（弾む square のメロディ・テンポよく）
   boss3: { bass: BOSS3_BASS, lead: BOSS3_LEAD, bassWave: "square", stepDur: 0.15, leadWave: "square" },
+  // タイトル：壮大なファンファーレ（金管風の sawtooth メロディ・ゆったり堂々と）
+  title: { bass: TITLE_BASS, lead: TITLE_LEAD, bassWave: "triangle", stepDur: 0.3, leadWave: "sawtooth" },
 } satisfies Record<string, TrackDef>;
 
 const MUSIC_VOL = 0.35; // BGM全体の音量（効果音より控えめに）

@@ -359,6 +359,7 @@ type GameState = "title" | "playing" | "gameover" | "clear";
 let gameState: GameState = "title"; // 起動時はタイトル画面から
 let resultLock = 0; // 決着直後、入力を受け付けない時間（秒）
 let titleLock = 0; // タイトルに戻った直後、入力を受け付けない時間（秒）
+let audioReady = false; // 一度でも音を有効化したか（最初の1操作はBGMを鳴らす合図に使う）
 
 // 連戦の進行：今が何ステージ目か
 let stageIndex = 0; // 0 = ステージ1
@@ -1050,8 +1051,20 @@ function update(dt: number): void {
 
   // タイトル画面：キー or タップでゲーム開始
   if (gameState === "title") {
+    // タイトルでは壮大なファンファーレを流す。
+    // （音はブラウザの制限で最初の操作後に有効になるため、有効になり次第ここで鳴り始める）
+    setMusic("title");
     if (titleLock > 0) titleLock -= dt;
-    else if (isDown("KeyZ", "Space", "Enter") || tapped) resetGame();
+    else if (isDown("KeyZ", "Space", "Enter") || tapped) {
+      // まだ一度も音を有効化していなければ、この操作は「BGMを鳴らす合図」にする。
+      // （こうしないと、最初の1操作で即ゲーム開始してタイトル曲が鳴る間がない）
+      if (!audioReady) {
+        audioReady = true;
+        titleLock = 0.6; // 続けてもう一度押すとスタート（曲を聴ける間をつくる）
+      } else {
+        resetGame();
+      }
+    }
     return;
   }
 
