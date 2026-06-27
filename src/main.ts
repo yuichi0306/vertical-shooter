@@ -2941,9 +2941,9 @@ function render(): void {
     ctx.shadowColor = "rgba(92, 255, 157, 0.7)";
     ctx.shadowBlur = 18;
     ctx.fillStyle = "#5cff9d";
-    ctx.font = "bold 34px monospace";
-    ctx.fillText("VERTICAL", WIDTH / 2, HEIGHT / 2 - 70);
-    ctx.fillText("SHOOTER", WIDTH / 2, HEIGHT / 2 - 30);
+    ctx.font = "bold 40px sans-serif";
+    ctx.fillText("ゴリラ、", WIDTH / 2, HEIGHT / 2 - 70);
+    ctx.fillText("また来た。", WIDTH / 2, HEIGHT / 2 - 24);
     ctx.restore();
 
     ctx.fillStyle = "#ffffff";
