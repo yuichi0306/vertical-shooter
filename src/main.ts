@@ -19,6 +19,9 @@ const STEP = 1 / FPS; // 1回の更新が進める時間（秒）
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 
+// 右上の「あそびかた」リンク（プレイ中は隠す）
+const helpLink = document.getElementById("help-link") as HTMLElement | null;
+
 // -------------------------------------------------------------------
 // キーボード入力：今どのキーが押されているかを覚えておく
 // -------------------------------------------------------------------
@@ -2093,6 +2096,11 @@ function drawTouchControls(): void {
 // render: 今の状態を画面に描く
 // -------------------------------------------------------------------
 function render(): void {
+  // 「あそびかた」リンクはプレイ中だけ隠す（タイトル・決着では表示）
+  if (helpLink) {
+    helpLink.style.display = gameState === "playing" ? "none" : "";
+  }
+
   // 背景（夜空 or 地球の空。テーマで切り替わる）
   drawBackground();
 
@@ -2246,74 +2254,75 @@ function render(): void {
   ctx.restore();
 
   // プレイ中の情報表示（スコア・残機・パワー・ボム）を角丸パネルにまとめる
-  const hudX = 10;
-  const hudY = 12;
-  const hudW = 176;
-  const hudH = 118;
+  // ※ふた回り小さくして、ボス戦などで邪魔にならないように
+  const hudX = 8;
+  const hudY = 10;
+  const hudW = 138;
+  const hudH = 92;
   // 半透明の角丸パネル（どんな背景でも読めるように）
   ctx.fillStyle = "rgba(8, 12, 24, 0.55)";
   ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.roundRect(hudX, hudY, hudW, hudH, 10);
+  ctx.roundRect(hudX, hudY, hudW, hudH, 8);
   ctx.fill();
   ctx.stroke();
 
   // 文字に薄い影（明るい空テーマでも読める）
   ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
   ctx.shadowBlur = 3;
-  const tx = hudX + 12;
+  const tx = hudX + 9;
 
   // SCORE（いちばん目立たせる）
   ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 18px monospace";
-  ctx.fillText(`${score}`, tx, hudY + 26);
+  ctx.font = "bold 15px monospace";
+  ctx.fillText(`${score}`, tx, hudY + 21);
   ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-  ctx.font = "10px monospace";
-  ctx.fillText("SCORE", tx + 1, hudY + 38);
+  ctx.font = "8px monospace";
+  ctx.fillText("SCORE", tx + 1, hudY + 31);
   // HI-SCORE（控えめに右側へ）
   ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
-  ctx.font = "11px monospace";
-  ctx.fillText(`HI ${highScore}`, tx + 78, hudY + 24);
+  ctx.font = "9px monospace";
+  ctx.fillText(`HI ${highScore}`, tx + 62, hudY + 19);
 
   // 残機（ハート）
-  ctx.font = "14px monospace";
+  ctx.font = "12px monospace";
   ctx.fillStyle = "#ff5c7a";
-  ctx.fillText("♥".repeat(Math.max(0, player.lives)) || "—", tx, hudY + 60);
+  ctx.fillText("♥".repeat(Math.max(0, player.lives)) || "—", tx, hudY + 49);
 
   // パワー（3段の小さなバー）
   ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
-  ctx.font = "10px monospace";
-  ctx.fillText("POWER", tx, hudY + 80);
+  ctx.font = "8px monospace";
+  ctx.fillText("POWER", tx, hudY + 65);
   for (let i = 0; i < POWER_MAX; i++) {
-    const bx = tx + 48 + i * 22;
+    const bx = tx + 40 + i * 17;
     const filled = i < player.power;
     ctx.fillStyle = filled ? "#7be0ff" : "rgba(255, 255, 255, 0.18)";
     ctx.beginPath();
-    ctx.roundRect(bx, hudY + 71, 18, 9, 3);
+    ctx.roundRect(bx, hudY + 58, 14, 7, 2);
     ctx.fill();
   }
 
   // ボム（今ある数だけ黄色い丸。多いときは6個＋数字で表示）
   ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
-  ctx.font = "10px monospace";
-  ctx.fillText("BOMB", tx, hudY + 102);
+  ctx.font = "8px monospace";
+  ctx.fillText("BOMB", tx, hudY + 83);
   const bombDots = Math.min(player.bombs, 6);
   for (let i = 0; i < bombDots; i++) {
-    const bx = tx + 48 + i * 14;
+    const bx = tx + 40 + i * 11;
     ctx.beginPath();
-    ctx.arc(bx + 5, hudY + 98, 5, 0, Math.PI * 2);
+    ctx.arc(bx + 4, hudY + 80, 4, 0, Math.PI * 2);
     ctx.fillStyle = "#ffd23b";
     ctx.fill();
   }
   if (player.bombs === 0) {
     ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
-    ctx.font = "11px monospace";
-    ctx.fillText("なし", tx + 48, hudY + 102);
+    ctx.font = "9px monospace";
+    ctx.fillText("なし", tx + 40, hudY + 83);
   } else if (player.bombs > 6) {
     ctx.fillStyle = "#ffd23b";
-    ctx.font = "11px monospace";
-    ctx.fillText(`+${player.bombs - 6}`, tx + 48 + 6 * 14, hudY + 102);
+    ctx.font = "9px monospace";
+    ctx.fillText(`+${player.bombs - 6}`, tx + 40 + 6 * 11, hudY + 83);
   }
 
   // ステージ開始時のバナー（「STAGE 2」など）。ボスがいない間だけ表示。
