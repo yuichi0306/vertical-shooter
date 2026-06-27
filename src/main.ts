@@ -443,7 +443,7 @@ const EAGLE_WANDER_SPEED = 130; // 鷲：ふらふら横移動する速さ（px/
 const EAGLE_WANDER_MIN = 0.5; // 鷲：方向を変えるまでの最短時間（秒）
 const EAGLE_WANDER_MAX = 1.2; // 鷲：方向を変えるまでの最長時間（秒）
 const EAGLE_FIRE_INTERVAL = 2.0; // 鷲：弾を撃つ間隔（秒）
-const GOLDPIG_HP = 6; // 黄金の豚：硬い（6発で撃破）
+const GOLDPIG_HP = 5; // 黄金の豚：硬い（5発で撃破）
 const GOLDPIG_SPEED = 130; // 黄金の豚：画面を横切る速さ（px/秒）
 const GOLDPIG_Y = 95; // 黄金の豚：飛ぶ高さ（中心）
 
