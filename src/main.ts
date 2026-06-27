@@ -232,7 +232,35 @@ function makeLayer(
 
 const farHills = makeLayer(6, 10, 18, 0.8, 1.5); // 遠い山（いちばんゆっくり）
 const clouds = makeLayer(7, 24, 42, 0.7, 1.6); // 流れる雲（中くらい）
-const nearGround = makeLayer(5, 60, 95, 1.0, 1.9); // 近い地面（いちばん速い）
+const nearGround = makeLayer(5, 60, 95, 1.0, 1.9); // 近い地面（夜空テーマ用・いちばん速い）
+
+// ステージ2（地球の空）の緑の島。陸地どうしが重ならないよう、
+// 縦に等間隔で並べて全部「同じ速さ」で流す（ベルトコンベア方式）。
+const ISLAND_COUNT = 4;
+const ISLAND_GAP = HEIGHT / ISLAND_COUNT; // 縦の間隔（=160px。島の高さより大きく取る）
+const ISLAND_SPEED = 70; // 全部この速さ（バラバラにしない＝追いついて重ならない）
+const ISLAND_MARGIN = 60; // 画面外に出たと判定する余白
+const islands: Deco[] = [];
+for (let i = 0; i < ISLAND_COUNT; i++) {
+  islands.push({
+    x: ISLAND_MARGIN + Math.random() * (WIDTH - ISLAND_MARGIN * 2),
+    y: i * ISLAND_GAP,
+    scale: 1.0 + Math.random() * 0.6, // 1.0〜1.6（間隔より小さく収まる大きさに制限）
+    speed: ISLAND_SPEED,
+  });
+}
+
+// 島を同じ速さで流し、下に出たらベルトの一番上へ戻す（間隔を保つので重ならない）
+function updateIslands(dt: number): void {
+  const belt = ISLAND_COUNT * ISLAND_GAP; // ベルト1周ぶんの長さ
+  for (const d of islands) {
+    d.y += ISLAND_SPEED * dt;
+    if (d.y - ISLAND_MARGIN > HEIGHT) {
+      d.y -= belt; // ちょうど1周ぶん上へ戻す（縦の等間隔を保つ）
+      d.x = ISLAND_MARGIN + Math.random() * (WIDTH - ISLAND_MARGIN * 2);
+    }
+  }
+}
 
 // 夜空のグラデーション（上＝濃い闇、下＝少し明るい地平線）。一度だけ作る。
 const skyGradientNight = ctx.createLinearGradient(0, 0, 0, HEIGHT);
@@ -816,6 +844,7 @@ function update(dt: number): void {
   updateLayer(farHills, dt, 60);
   updateLayer(clouds, dt, 40);
   updateLayer(nearGround, dt, 70);
+  updateIslands(dt); // 地球の空テーマの島（同じ速さ・等間隔で重ならない）
 
   // ボムの閃光・画面の揺れを時間で弱めていく（どの状態でも進める）
   if (bombFlash > 0) bombFlash -= dt;
@@ -2051,7 +2080,7 @@ function drawBackground(): void {
     ctx.fillStyle = skyGradientDay;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     for (const d of farHills) drawSeaSparkle(d);
-    for (const d of nearGround) drawIsland(d);
+    for (const d of islands) drawIsland(d);
     for (const d of clouds) drawCloudWhite(d);
   }
 }
