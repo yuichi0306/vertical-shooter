@@ -141,10 +141,15 @@ const STAGE2: Stage = {
     { time: 3.5, kind: "snake", x: 0.2 },
     { time: 3.5, kind: "snake", x: 0.8 },
 
+    // 早めに「下から」を1回見せる（くねって上る蛇）
+    { time: 4.5, kind: "snake", x: 0.25, from: "bottom" },
+
     // 鷲が登場（ふらふら動いて弾を撃つ）
     { time: 5.0, kind: "eagle", x: 0.5 },
     { time: 6.5, kind: "spider", x: 0.3 },
     { time: 6.5, kind: "spider", x: 0.7 },
+    // 下からも鷲が上がってくる
+    { time: 7.0, kind: "eagle", x: 0.8, from: "bottom" },
     { time: 7.5, kind: "eagle", x: 0.2 },
     { time: 8.0, kind: "eagle", x: 0.8 },
 
@@ -201,10 +206,16 @@ const STAGE3: Stage = {
     { time: 4.5, kind: "tuna", x: 0.25 },
     { time: 4.8, kind: "tuna", x: 0.75 },
 
+    // 海の中らしく、早めに「下から」上ってくる魚（まっすぐ速い）
+    { time: 5.5, kind: "tuna", x: 0.2, from: "bottom" },
+    { time: 5.5, kind: "tuna", x: 0.8, from: "bottom" },
+
     // イカ登場（ふらふら動いて撃つ）
     { time: 6.0, kind: "squid", x: 0.5 },
     { time: 7.0, kind: "jellyfish", x: 0.2 },
     { time: 7.0, kind: "jellyfish", x: 0.8 },
+    // 下からイカも上がってくる
+    { time: 8.0, kind: "squid", x: 0.5, from: "bottom" },
 
     // レアな黄金の豚（このステージに1匹だけ。右から飛んでくる）
     { time: 8.5, kind: "goldpig", x: 1.0 },
