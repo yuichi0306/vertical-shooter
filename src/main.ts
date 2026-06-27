@@ -1943,16 +1943,19 @@ function drawCloud(d: Deco): void {
   }
 }
 
-// 近い地面（暗い緑の島。ふちをうっすら明るく）
+// 近い地面（夜の島。青グレーで「奥の飾り」に下げ、緑の敵・アイテムと色がぶつからないように）
 function drawGround(d: Deco): void {
   const s = d.scale;
-  ctx.fillStyle = "#102219";
+  ctx.save();
+  ctx.globalAlpha = 0.6; // 少し薄くして背景に沈める
+  ctx.fillStyle = "#141b2e"; // 緑→青グレー
   ctx.beginPath();
   ctx.ellipse(d.x, d.y, 50 * s, 30 * s, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "rgba(95, 165, 115, 0.18)";
+  ctx.strokeStyle = "rgba(120, 140, 190, 0.16)"; // ふちも青系に
   ctx.lineWidth = 2;
   ctx.stroke();
+  ctx.restore();
 }
 
 // --- ここから「地球の空」テーマの背景パーツ ---
@@ -2169,11 +2172,23 @@ function render(): void {
   }
   ctx.globalAlpha = 1; // 透明度を元に戻す
 
-  // 自機のショット
-  ctx.fillStyle = "#fff36b";
+  // 自機のショット（光るエネルギー弾：黄色いオーラ＋白い芯）
+  ctx.save();
+  ctx.shadowColor = "#ffe14d";
+  ctx.shadowBlur = 9;
   for (const b of bullets) {
-    ctx.fillRect(b.x - 2, b.y - 8, 4, 12);
+    // 外側：丸みのある黄色いカプセル
+    ctx.fillStyle = "#ffd23b";
+    ctx.beginPath();
+    ctx.roundRect(b.x - 3, b.y - 10, 6, 18, 3);
+    ctx.fill();
+    // 内側：明るい白の芯
+    ctx.fillStyle = "#fffce0";
+    ctx.beginPath();
+    ctx.roundRect(b.x - 1.5, b.y - 8, 3, 12, 1.5);
+    ctx.fill();
   }
+  ctx.restore();
 
   // 自機（頭がキリン・体が亀のふしぎな生きもの。上＝進行方向）。
   // 無敵中だけ点滅させ、それ以外は常に表示。ゲームオーバー中は描かない。
