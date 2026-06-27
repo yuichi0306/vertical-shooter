@@ -170,6 +170,13 @@ const NORMAL3_LEAD = [79, 0, 76, 78, 76, 0, 74, 0, 72, 0, 74, 76, 74, 0, 0, 0];
 //   メロディ：シ♭シ♭シ♭（三連符風の入り）→ ファ↑ → シ♭↑ → ラ ソ ファ → ド↑ → シ♭
 const TITLE_BASS = [34, 46, 41, 46, 34, 46, 41, 46, 39, 51, 41, 53, 34, 46, 41, 41];
 const TITLE_LEAD = [70, 70, 70, 77, 0, 82, 0, 0, 81, 79, 77, 84, 0, 0, 82, 0];
+
+// 通常BGM（ステージ4・氷の世界）：きらきら幻想的（ニ長調・やわらかく流れる）
+const NORMAL4_BASS = [38, 0, 45, 0, 43, 0, 50, 0, 47, 0, 45, 0, 40, 0, 45, 0];
+const NORMAL4_LEAD = [81, 0, 86, 0, 84, 0, 81, 0, 83, 0, 86, 88, 86, 0, 83, 0];
+// ボス戦BGM（ステージ4）：勇ましく冷たい緊張感（ロ短調・速め）
+const BOSS4_BASS = [47, 47, 54, 47, 43, 43, 50, 43, 45, 45, 52, 45, 42, 42, 49, 42];
+const BOSS4_LEAD = [83, 0, 81, 83, 86, 0, 83, 0, 81, 0, 78, 81, 83, 0, 81, 0];
 // ボス戦BGM（ステージ3）：コミカルで弾む（低高に跳ねるベース＋おどけたメロディ）
 const BOSS3_BASS = [36, 48, 36, 48, 41, 53, 41, 53, 40, 52, 40, 52, 43, 55, 43, 55];
 const BOSS3_LEAD = [72, 74, 76, 0, 79, 0, 76, 0, 71, 72, 74, 0, 67, 0, 0, 0];
@@ -195,6 +202,10 @@ const TRACKS = {
   boss3: { bass: BOSS3_BASS, lead: BOSS3_LEAD, bassWave: "square", stepDur: 0.15, leadWave: "square" },
   // タイトル：壮大なファンファーレ（金管風の sawtooth メロディ・ゆったり堂々と）
   title: { bass: TITLE_BASS, lead: TITLE_LEAD, bassWave: "triangle", stepDur: 0.3, leadWave: "sawtooth" },
+  // ステージ4：氷の世界（きらきら幻想的な triangle のメロディ・やわらかく流れる）
+  normal4: { bass: NORMAL4_BASS, lead: NORMAL4_LEAD, bassWave: "triangle", stepDur: 0.2, leadWave: "triangle" },
+  // ステージ4：勇ましく冷たいボス戦（brassy な sawtooth・速め）
+  boss4: { bass: BOSS4_BASS, lead: BOSS4_LEAD, bassWave: "sawtooth", stepDur: 0.15, leadWave: "sawtooth" },
 } satisfies Record<string, TrackDef>;
 
 const MUSIC_VOL = 0.35; // BGM全体の音量（効果音より控えめに）

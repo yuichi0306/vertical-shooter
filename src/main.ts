@@ -303,6 +303,35 @@ skyGradientSea.addColorStop(0, "#2aa7c4"); // 水面に近い明るい水色
 skyGradientSea.addColorStop(0.5, "#136a93"); // 中ほどの青
 skyGradientSea.addColorStop(1, "#062744"); // 深い藍
 
+// 氷の世界のグラデーション（上＝夜明けの藍、下＝雪原の白っぽい水色）。一度だけ作る。
+const skyGradientIce = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+skyGradientIce.addColorStop(0, "#13325a"); // 上空の濃い藍
+skyGradientIce.addColorStop(0.55, "#4f7eb0"); // 中ほどの青
+skyGradientIce.addColorStop(1, "#cfe6f5"); // 下＝雪原の明るい水色
+
+// 氷の世界の雪（ステージ4）。上から下へ降り、左右にゆれる。下に出たら上へ戻す。
+const snowflakes: Deco[] = [];
+for (let i = 0; i < 60; i++) {
+  snowflakes.push({
+    x: Math.random() * WIDTH,
+    y: Math.random() * HEIGHT,
+    scale: 0.4 + Math.random() * 1.2, // 大きい雪ほど手前＝速く落ちる
+    speed: 30 + Math.random() * 60,
+  });
+}
+
+// 雪を下へ動かす。ふわふわ横揺れしながら降る。下に出たら上から出し直す。
+function updateSnow(dt: number): void {
+  for (const d of snowflakes) {
+    d.y += d.speed * dt;
+    d.x += Math.sin((d.y + d.speed) * 0.02) * 10 * dt; // ふわふわ横揺れ
+    if (d.y > HEIGHT + 6) {
+      d.y = -6;
+      d.x = Math.random() * WIDTH;
+    }
+  }
+}
+
 // 今の背景テーマ（ステージごとに切り替わる）。起動時／タイトルは夜空。
 let theme: StageTheme = "night";
 
@@ -524,6 +553,13 @@ const TUNA_SPEED = 260; // マグロ：まっすぐ速く下りる速さ（黄�
 // クラゲは「蛇と同じ動き」、イカは「鷲と同じ動き」なので専用の定数は不要
 // （クラゲ＝snakeの定数、イカ＝eagleの定数をそのまま使う）
 
+// ステージ4（氷の世界）の敵。動きは既存を流用：
+//   つらら＝マグロ（まっすぐ速い）、ペンギン＝蛇（くねって撃つ）、シロクマ＝鷲（ふらふら撃つ）
+const SHIROKUMA_HP = 3; // シロクマ：硬い（3発で撃破。鷲より手ごわい）
+const YUKIDARUMA_HP = 2; // 雪だるま：少し硬い（2発）
+const YUKIDARUMA_SPEED = 52; // 雪だるま：ゆっくり下りる速さ（カタツムリくらい）
+const YUKIDARUMA_FIRE_INTERVAL = 2.4; // 雪だるま：たまに自機へ弾を撃つ間隔（秒）
+
 // エンジェル（お助けキャラ）：黄金の豚と同じく横切りつつ、上下にも大きく動く
 const ANGEL_SPEED = 110; // 画面を横切る速さ（px/秒）
 const ANGEL_Y = 200; // 上下の動きの中心の高さ
@@ -541,6 +577,10 @@ const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
   tuna: "#8fb8d6", // マグロ＝青銀
   squid: "#d98fe0", // イカ＝うす紫
   angel: "#fff3b0", // エンジェル＝淡い金（※倒さないので通常は未使用）
+  tsurara: "#bfe8ff", // つらら＝氷の水色
+  penguin: "#cfe9f5", // ペンギン＝白っぽい水色
+  shirokuma: "#eaf3fb", // シロクマ＝白
+  yukidaruma: "#ffffff", // 雪だるま＝白
 };
 
 // kind … 敵の種類、baseX … 揺れの基準になる横位置、age … 出現からの経過秒
@@ -579,11 +619,15 @@ function spawnEnemy(kind: EnemyKind, xRatio: number, from: "top" | "bottom" = "t
   let hp = ENEMY_HP;
   let vx = 0;
   let vy = 0;
-  if (kind === "eagle" || kind === "squid") {
-    // イカは鷲と同じ動き（ふらふら動いて撃つ）
-    hp = EAGLE_HP;
+  if (kind === "eagle" || kind === "squid" || kind === "shirokuma") {
+    // イカ・シロクマは鷲と同じ動き（ふらふら動いて撃つ）。シロクマだけ硬い
+    hp = kind === "shirokuma" ? SHIROKUMA_HP : EAGLE_HP;
     fireTimer = EAGLE_FIRE_INTERVAL * (0.5 + Math.random());
     vy = EAGLE_FALL_SPEED * dir; // 進む向き（下から出たら上へ）
+  } else if (kind === "yukidaruma") {
+    // 雪だるま：ゆっくり下りつつ、たまに撃つ（少し硬い）
+    hp = YUKIDARUMA_HP;
+    fireTimer = YUKIDARUMA_FIRE_INTERVAL * (0.6 + Math.random() * 0.8);
   } else if (kind === "goldpig") {
     hp = GOLDPIG_HP;
     // x=0 なら左から右へ、x=1 なら右から左へ、画面の外から飛んでくる
@@ -725,6 +769,15 @@ function bossPatternTwinStream(b: Boss): void {
   }
 }
 
+// 攻撃パターン6：画面の上のあちこちから、まっすぐ下へ「つらら」を降らせる（スノーゴリラ用）
+function bossPatternIcicles(b: Boss): void {
+  void b;
+  for (let i = 0; i < 6; i++) {
+    const x = (WIDTH / 6) * (i + 0.5) + (Math.random() * 30 - 15);
+    fireEnemyBullet(x, 8, Math.PI / 2); // 真下へ
+  }
+}
+
 // ボスごとの設定（体力・動き・攻撃の激しさ・使う技の一覧）
 type BossConfig = {
   maxHp: number; // 体力
@@ -794,6 +847,28 @@ const BOSS_CONFIG: Record<BossKind, BossConfig> = {
     chargeInterval: 5.0, // 約5秒ごとに突進
     chargeIntervalEnraged: 3.0, // 怒り時はもっと頻繁に
     chargeSpeed: 430, // 突進の速さ
+  },
+  // ステージ4：スノーゴリラ（酸素ボンベゴリラより少し硬く・つらら降らしを追加）
+  snowGorilla: {
+    maxHp: 165,
+    swaySpeed: 95,
+    swaySpeedEnraged: 150,
+    bobAmplitude: 50, // 前後にも動く
+    bobSpeed: 1.3,
+    fireInterval: 1.05,
+    fireIntervalEnraged: 0.58,
+    patterns: [
+      bossPatternAimedWide,
+      bossPatternIcicles, // つらら降らし
+      bossPatternFan,
+      bossPatternRing,
+      bossPatternIcicles,
+      bossPatternSpiral,
+      bossPatternTwinStream,
+    ],
+    chargeInterval: 5.5, // たまに突進（氷の床を滑るイメージ）
+    chargeIntervalEnraged: 3.2,
+    chargeSpeed: 450,
   },
 };
 
@@ -914,7 +989,9 @@ function defeatBoss(): void {
       ? "#7fe9ff"
       : boss.kind === "scubaGorilla"
         ? "#7fffe0"
-        : "#b15cff";
+        : boss.kind === "snowGorilla"
+          ? "#cdeefb"
+          : "#b15cff";
   spawnExplosion(boss.x, boss.y, color, 70); // 大きな爆発
   playBossExplosion();
   boss = null;
@@ -1029,6 +1106,7 @@ function update(dt: number): void {
   updateLayer(nearGround, dt, 70);
   updateIslands(dt); // 地球の空テーマの島（同じ速さ・等間隔で重ならない）
   updateBubbles(dt); // 海の中テーマの泡（下から上へ立ちのぼる）
+  updateSnow(dt); // 氷の世界テーマの降る雪
 
   // ボムの閃光・画面の揺れを時間で弱めていく（どの状態でも進める）
   if (bombFlash > 0) bombFlash -= dt;
@@ -1180,8 +1258,17 @@ function update(dt: number): void {
     if (e.kind === "snail") {
       // カタツムリ：ほとんど動かず、ゆっくり下りる（dir=-1なら上る）だけ
       e.y += SNAIL_SPEED * dt * e.dir;
-    } else if (e.kind === "snake" || e.kind === "jellyfish") {
-      // 蛇・クラゲ：基準位置を中心に、サイン波で左右にくねりながら下りる（dir=-1なら上る）
+    } else if (e.kind === "yukidaruma") {
+      // 雪だるま：カタツムリのようにゆっくり下りつつ、たまに自機へ弾を撃つ
+      e.y += YUKIDARUMA_SPEED * dt * e.dir;
+      e.fireTimer -= dt;
+      if (e.fireTimer <= 0 && e.y > 0 && e.y < HEIGHT - 80) {
+        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+        fireEnemyBullet(e.x, e.y, angle);
+        e.fireTimer = YUKIDARUMA_FIRE_INTERVAL;
+      }
+    } else if (e.kind === "snake" || e.kind === "jellyfish" || e.kind === "penguin") {
+      // 蛇・クラゲ・ペンギン：基準位置を中心に、サイン波で左右にくねりながら下りる（dir=-1なら上る）
       e.y += ENEMY_SPEED * dt * e.dir;
       e.x = e.baseX + Math.sin(e.age * SNAKE_FREQ) * SNAKE_AMPLITUDE;
       // 画面内にいる間はたまに自機へ弾を撃つ
@@ -1191,8 +1278,8 @@ function update(dt: number): void {
         fireEnemyBullet(e.x, e.y, angle);
         e.fireTimer = SNAKE_FIRE_INTERVAL;
       }
-    } else if (e.kind === "tuna") {
-      // マグロ：まっすぐ進む、ただし速い（黄金の豚の2倍速）。dir=-1なら下から上へ
+    } else if (e.kind === "tuna" || e.kind === "tsurara") {
+      // マグロ・つらら：まっすぐ進む、ただし速い（黄金の豚の2倍速）。dir=-1なら下から上へ
       e.y += TUNA_SPEED * dt * e.dir;
     } else if (e.kind === "spider") {
       // 蜘蛛：糸で上下に伸び縮みしながら（縦に動いて）下りる。
@@ -1207,7 +1294,7 @@ function update(dt: number): void {
       e.x += e.vx * dt;
       e.y = ANGEL_Y + Math.sin(e.age * 2.2) * ANGEL_AMP;
     } else {
-      // 鷲・イカ：一定時間ごとに進む向きをランダムに変えて、ふらふら動き回る。
+      // 鷲・イカ・シロクマ：一定時間ごとに進む向きをランダムに変えて、ふらふら動き回る。
       // 横は気まぐれ、縦は必ず少しずつ下りる（いつか画面外へ出る）。
       e.wanderTimer -= dt;
       if (e.wanderTimer <= 0) {
@@ -2223,11 +2310,249 @@ function drawAngel(cx: number, cy: number, age: number): void {
   ctx.restore();
 }
 
+// -------------------------------------------------------------------
+// 敵その9：つらら／氷の塊（ステージ4）。(cx, cy) が中心。先端は下向き。
+// -------------------------------------------------------------------
+function drawTsurara(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const shimmer = 0.5 + 0.5 * Math.sin(age * 6); // きらめき
+
+  // 本体（下にとがった氷の柱）
+  ctx.fillStyle = "#bfe8ff";
+  ctx.beginPath();
+  ctx.moveTo(-7, -14);
+  ctx.lineTo(7, -14);
+  ctx.lineTo(2, 6);
+  ctx.lineTo(0, 16); // とがった先端
+  ctx.lineTo(-2, 6);
+  ctx.closePath();
+  ctx.fill();
+  // 内側の明るい芯
+  ctx.fillStyle = "#eaf7ff";
+  ctx.beginPath();
+  ctx.moveTo(-3, -12);
+  ctx.lineTo(2, -12);
+  ctx.lineTo(0, 8);
+  ctx.closePath();
+  ctx.fill();
+  // ふちの濃い水色
+  ctx.strokeStyle = "#7fc4ec";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(-7, -14);
+  ctx.lineTo(0, 16);
+  ctx.lineTo(7, -14);
+  ctx.stroke();
+  // きらり（白い光点）
+  ctx.fillStyle = `rgba(255,255,255,${0.4 + shimmer * 0.5})`;
+  ctx.beginPath();
+  ctx.arc(-2, -6, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// 敵その10：ペンギン（ステージ4）。(cx, cy) が中心。age で羽と体が揺れる。
+// -------------------------------------------------------------------
+function drawPenguin(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const waddle = Math.sin(age * 5) * 3; // よちよち左右に傾く
+  const flap = Math.sin(age * 8) * 3; // 羽ばたき
+  ctx.rotate((waddle * Math.PI) / 180);
+
+  // 体（黒い背中）
+  ctx.fillStyle = "#2b3442";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 11, 15, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // おなか（白）
+  ctx.fillStyle = "#f4fbff";
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 7, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 羽（左右・羽ばたく）
+  ctx.fillStyle = "#222a36";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 9, -4);
+    ctx.quadraticCurveTo(side * 16, 2 + flap, side * 9, 10);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 足（オレンジ）
+  ctx.fillStyle = "#ff9f3a";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(side * 4, 15, 4, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // くちばし（オレンジの三角・下向き）
+  ctx.fillStyle = "#ff9f3a";
+  ctx.beginPath();
+  ctx.moveTo(-3, -7);
+  ctx.lineTo(3, -7);
+  ctx.lineTo(0, -2);
+  ctx.closePath();
+  ctx.fill();
+
+  // 目
+  ctx.fillStyle = "#10151c";
+  ctx.beginPath();
+  ctx.arc(-3.5, -9, 1.6, 0, Math.PI * 2);
+  ctx.arc(3.5, -9, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// 敵その11：シロクマ（ステージ4）。(cx, cy) が中心。age で歩く揺れ。硬い。
+// -------------------------------------------------------------------
+function drawPolarBear(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const sway = Math.sin(age * 4); // のっそり歩く揺れ
+  const FUR = "#eef5fb";
+  const FUR_SHADOW = "#cdddec";
+
+  // 手足（4本・のっそり）
+  ctx.fillStyle = FUR_SHADOW;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(side * 10, 12 + sway * side * 2, 5, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 体（大きな白い丸）
+  ctx.fillStyle = FUR;
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 16, 15, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 頭
+  ctx.beginPath();
+  ctx.ellipse(0, -13, 11, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 耳
+  ctx.fillStyle = FUR;
+  ctx.beginPath();
+  ctx.arc(-8, -20, 3.5, 0, Math.PI * 2);
+  ctx.arc(8, -20, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = FUR_SHADOW;
+  ctx.beginPath();
+  ctx.arc(-8, -20, 1.8, 0, Math.PI * 2);
+  ctx.arc(8, -20, 1.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 鼻先（少し前に出た口元）
+  ctx.fillStyle = "#e3eef7";
+  ctx.beginPath();
+  ctx.ellipse(0, -9, 6, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 鼻
+  ctx.fillStyle = "#2a2f38";
+  ctx.beginPath();
+  ctx.arc(0, -10, 2, 0, Math.PI * 2);
+  ctx.fill();
+  // 目
+  ctx.beginPath();
+  ctx.arc(-4.5, -15, 1.6, 0, Math.PI * 2);
+  ctx.arc(4.5, -15, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// 敵その12：雪だるま（ステージ4）。(cx, cy) が中心。age でわずかに揺れる。
+// -------------------------------------------------------------------
+function drawSnowman(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const tilt = Math.sin(age * 2.5) * 2; // ゆらゆら
+  ctx.rotate((tilt * Math.PI) / 180);
+
+  // 下の玉（大）
+  ctx.fillStyle = "#f6fbff";
+  ctx.beginPath();
+  ctx.arc(0, 8, 12, 0, Math.PI * 2);
+  ctx.fill();
+  // 上の玉（小＝頭）
+  ctx.beginPath();
+  ctx.arc(0, -8, 8.5, 0, Math.PI * 2);
+  ctx.fill();
+  // 影でまるみを出す
+  ctx.fillStyle = "rgba(180, 205, 228, 0.5)";
+  ctx.beginPath();
+  ctx.arc(4, 10, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 腕（枝）
+  ctx.strokeStyle = "#7a5230";
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = "round";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 8, 2);
+    ctx.lineTo(side * 16, -3);
+    ctx.moveTo(side * 12, -0.5);
+    ctx.lineTo(side * 15, 2);
+    ctx.stroke();
+  }
+
+  // ボタン（炭）
+  ctx.fillStyle = "#33373f";
+  ctx.beginPath();
+  ctx.arc(0, 5, 1.4, 0, Math.PI * 2);
+  ctx.arc(0, 10, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 鼻（にんじん）
+  ctx.fillStyle = "#ff8a2a";
+  ctx.beginPath();
+  ctx.moveTo(0, -8);
+  ctx.lineTo(7, -6.5);
+  ctx.lineTo(0, -5);
+  ctx.closePath();
+  ctx.fill();
+  // 目
+  ctx.fillStyle = "#33373f";
+  ctx.beginPath();
+  ctx.arc(-3, -10, 1.3, 0, Math.PI * 2);
+  ctx.arc(3, -10, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // バケツの帽子
+  ctx.fillStyle = "#7f8a96";
+  ctx.fillRect(-6, -20, 12, 6);
+  ctx.fillRect(-7.5, -15, 15, 2.5);
+
+  ctx.restore();
+}
+
 // 敵を種類に応じた姿で描く
 function drawEnemy(e: Enemy): void {
   // 下から上る敵（dir<0）は絵を上下に反転して進行方向（上）を向かせる。
-  // ただしクラゲ・イカは元から上向きが自然なので反転しない。
-  const flip = e.dir < 0 && e.kind !== "jellyfish" && e.kind !== "squid";
+  // ただしクラゲ・イカ・ペンギン・シロクマ・雪だるまは上向きでも不自然なので反転しない
+  // （つららは反転して進行方向＝上を向くと自然なので反転対象のまま）。
+  const flip =
+    e.dir < 0 &&
+    e.kind !== "jellyfish" &&
+    e.kind !== "squid" &&
+    e.kind !== "penguin" &&
+    e.kind !== "shirokuma" &&
+    e.kind !== "yukidaruma";
   if (flip) {
     ctx.save();
     ctx.translate(e.x, e.y);
@@ -2243,6 +2568,10 @@ function drawEnemy(e: Enemy): void {
   else if (e.kind === "tuna") drawTuna(cx, cy, e.age);
   else if (e.kind === "squid") drawSquid(cx, cy, e.age);
   else if (e.kind === "angel") drawAngel(cx, cy, e.age);
+  else if (e.kind === "tsurara") drawTsurara(cx, cy, e.age);
+  else if (e.kind === "penguin") drawPenguin(cx, cy, e.age);
+  else if (e.kind === "shirokuma") drawPolarBear(cx, cy, e.age);
+  else if (e.kind === "yukidaruma") drawSnowman(cx, cy, e.age);
   else drawGoldPig(cx, cy, e.age);
   if (flip) ctx.restore();
 }
@@ -2696,6 +3025,162 @@ function drawScubaGorilla(cx: number, cy: number, walk: number, enraged = false)
   ctx.restore();
 }
 
+// -------------------------------------------------------------------
+// ボス：スノーゴリラ（ステージ4）。白いモコモコの毛＋つららの牙。
+//   (cx, cy) が中心。walk が大きいほど腕と足が振れる。enraged で赤く光る。
+// -------------------------------------------------------------------
+function drawSnowGorillaBoss(cx: number, cy: number, walk: number, enraged = false): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const swing = Math.sin(walk);
+  const bob = Math.sin(walk * 2) * 2;
+
+  // 怒りオーラ（赤く脈打つ）
+  if (enraged) {
+    const pulse = 0.5 + 0.5 * Math.sin(walk * 1.5);
+    ctx.save();
+    ctx.globalAlpha = 0.25 + pulse * 0.25;
+    ctx.fillStyle = "#ff3b3b";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 44 + pulse * 6, 50 + pulse * 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  } else {
+    // 通常時は冷気の青白いオーラ
+    const pulse = 0.5 + 0.5 * Math.sin(walk * 1.2);
+    ctx.save();
+    ctx.globalAlpha = 0.16 + pulse * 0.12;
+    ctx.fillStyle = "#bfe8ff";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 42 + pulse * 5, 48 + pulse * 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 舞い散る冷気（小さな雪のきらめき）
+  ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+  for (let i = 0; i < 5; i++) {
+    const sx = -24 + ((walk * 22 + i * 30) % 60);
+    const sy = -30 + ((walk * 16 + i * 18) % 56);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 1.4 + (i % 2), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.translate(0, bob);
+
+  const FUR = "#eef5fb"; // 白い毛
+  const FUR_DARK = "#cdddec"; // 影
+  const SKIN = "#2b3442"; // 顔の濃い色
+
+  // --- 足（左右で逆に踏み出す）---
+  ctx.strokeStyle = FUR_DARK;
+  ctx.lineWidth = 15;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-11, 16);
+  ctx.lineTo(-13 + swing * 6, 34);
+  ctx.moveTo(11, 16);
+  ctx.lineTo(13 - swing * 6, 34);
+  ctx.stroke();
+
+  // --- 腕（足と逆向きに振る）---
+  ctx.strokeStyle = FUR;
+  ctx.lineWidth = 16;
+  ctx.beginPath();
+  ctx.moveTo(-18, -12);
+  ctx.lineTo(-31 - swing * 6, 20);
+  ctx.moveTo(18, -12);
+  ctx.lineTo(31 + swing * 6, 20);
+  ctx.stroke();
+  // こぶし
+  ctx.fillStyle = FUR_DARK;
+  ctx.beginPath();
+  ctx.arc(-31 - swing * 6, 23, 10, 0, Math.PI * 2);
+  ctx.arc(31 + swing * 6, 23, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 胴体（モコモコ）---
+  ctx.fillStyle = FUR;
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 24, 26, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // おなかの明るいふくらみ
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.ellipse(0, 6, 14, 18, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 頭 ---
+  // 耳
+  ctx.fillStyle = FUR;
+  ctx.beginPath();
+  ctx.arc(-18, -25, 6, 0, Math.PI * 2);
+  ctx.arc(18, -25, 6, 0, Math.PI * 2);
+  ctx.fill();
+  // 頭本体
+  ctx.beginPath();
+  ctx.ellipse(0, -24, 19, 17, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 顔（濃い色）
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.ellipse(0, -20, 13, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 目（怒りで赤く光る）
+  ctx.fillStyle = enraged ? "#ff4040" : "#dff3ff";
+  ctx.beginPath();
+  ctx.arc(-5, -23, 3, 0, Math.PI * 2);
+  ctx.arc(5, -23, 3, 0, Math.PI * 2);
+  ctx.fill();
+  if (enraged) {
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = "#ff6060";
+    ctx.beginPath();
+    ctx.arc(-5, -23, 5, 0, Math.PI * 2);
+    ctx.arc(5, -23, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // 鼻の穴
+  ctx.fillStyle = "#11161e";
+  ctx.beginPath();
+  ctx.arc(-3, -15, 1.4, 0, Math.PI * 2);
+  ctx.arc(3, -15, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // つららの牙（口元から下へ伸びる氷の歯）
+  ctx.fillStyle = "#cdeefb";
+  for (const fx of [-6, -2, 2, 6]) {
+    ctx.beginPath();
+    ctx.moveTo(fx - 2, -11);
+    ctx.lineTo(fx + 2, -11);
+    ctx.lineTo(fx, -5);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 頭に積もった雪＆つららの冠
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.ellipse(0, -38, 16, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#cdeefb";
+  for (const ix of [-12, -4, 4, 12]) {
+    ctx.beginPath();
+    ctx.moveTo(ix - 2.5, -36);
+    ctx.lineTo(ix + 2.5, -36);
+    ctx.lineTo(ix, -28);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 // 遠い山（暗い青のなだらかな影）
 function drawHill(d: Deco): void {
   ctx.fillStyle = "#161f38";
@@ -2806,7 +3291,7 @@ function drawBackground(): void {
     for (const d of farHills) drawSeaSparkle(d);
     for (const d of islands) drawIsland(d);
     for (const d of clouds) drawCloudWhite(d);
-  } else {
+  } else if (theme === "sea") {
     // 海の中：藍のグラデーション → 差し込む光 → 奥の岩 → 立ちのぼる泡
     ctx.fillStyle = skyGradientSea;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -2815,7 +3300,79 @@ function drawBackground(): void {
     for (const d of farHills) drawSeaRock(d);
     ctx.filter = "none";
     for (const d of bubbles) drawBubble(d);
+  } else {
+    // 氷の世界：藍→白のグラデーション → オーロラ → 奥の氷山 → 近い雪の丘 → 降る雪
+    ctx.fillStyle = skyGradientIce;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    drawAurora();
+    ctx.fillStyle = "#dff0fb"; // 遠くの星のかわりに、空のきらめき
+    for (const s of stars) ctx.fillRect(s.x, s.y, s.size, s.size);
+    ctx.filter = "blur(2px)"; // 奥の氷山はぼかして遠近感
+    for (const d of farHills) drawIceberg(d);
+    ctx.filter = "none";
+    for (const d of nearGround) drawSnowHill(d);
+    for (const d of snowflakes) drawSnowflake(d);
   }
+}
+
+// 氷の世界：奥でゆらめくオーロラ（緑〜紫の光のカーテン）
+function drawAurora(): void {
+  const t = performance.now() / 1000;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const colors = ["rgba(90, 230, 170,", "rgba(120, 160, 240,", "rgba(190, 130, 230,"];
+  for (let i = 0; i < 3; i++) {
+    const baseX = (i + 0.5) * (WIDTH / 3);
+    const sway = Math.sin(t * 0.4 + i * 1.2) * 40;
+    const alpha = 0.06 + 0.05 * (0.5 + 0.5 * Math.sin(t * 0.6 + i));
+    ctx.fillStyle = colors[i] + alpha + ")";
+    ctx.beginPath();
+    ctx.moveTo(baseX - 50 + sway, 0);
+    ctx.quadraticCurveTo(baseX + sway, HEIGHT * 0.3, baseX - 20 + sway, HEIGHT * 0.5);
+    ctx.lineTo(baseX + 40 + sway, HEIGHT * 0.5);
+    ctx.quadraticCurveTo(baseX + 70 + sway, HEIGHT * 0.3, baseX + 30 + sway, 0);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// 氷の世界：奥に並ぶ氷山のシルエット（青白い三角）
+function drawIceberg(d: Deco): void {
+  const s = d.scale;
+  ctx.fillStyle = "rgba(225, 240, 252, 0.7)";
+  ctx.beginPath();
+  ctx.moveTo(d.x - 46 * s, d.y + 20 * s);
+  ctx.lineTo(d.x, d.y - 26 * s);
+  ctx.lineTo(d.x + 46 * s, d.y + 20 * s);
+  ctx.closePath();
+  ctx.fill();
+  // 雪をかぶった明るい頂
+  ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.beginPath();
+  ctx.moveTo(d.x - 16 * s, d.y - 4 * s);
+  ctx.lineTo(d.x, d.y - 26 * s);
+  ctx.lineTo(d.x + 16 * s, d.y - 4 * s);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// 氷の世界：近い雪の丘（手前を流れる白いふくらみ・ひかえめに）
+function drawSnowHill(d: Deco): void {
+  const s = d.scale;
+  ctx.fillStyle = "rgba(244, 251, 255, 0.4)";
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y + 34 * s, 56 * s, 24 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// 氷の世界：降る雪（1粒）
+function drawSnowflake(d: Deco): void {
+  const s = d.scale;
+  ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + s * 0.3})`;
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, 1.4 * s, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // 海の中：水面から差し込む光のすじ（ゆっくり明滅・移動）
@@ -3016,6 +3573,8 @@ function render(): void {
       drawMachineGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
     } else if (boss.kind === "scubaGorilla") {
       drawScubaGorilla(boss.x, boss.y, boss.walk, boss.enraged);
+    } else if (boss.kind === "snowGorilla") {
+      drawSnowGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
     } else {
       drawGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
     }
@@ -3029,7 +3588,9 @@ function render(): void {
         ? "#5cd6ff"
         : boss.kind === "scubaGorilla"
           ? "#5cffd0"
-          : "#ff5cc8";
+          : boss.kind === "snowGorilla"
+            ? "#bfe8ff"
+            : "#ff5cc8";
     ctx.fillRect(20, 12, barW * ratio, 10);
   }
 

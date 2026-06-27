@@ -22,6 +22,10 @@
 //   "squid"     … イカ（ステージ3）。鷲と同じ動き（ふらふら動いて弾を撃つ）
 //   "angel"     … エンジェル（お助けキャラ／ステージ2）。黄金の豚＋上下の動きで横切る。
 //                 倒す相手ではなく、触れると残機(ハート)が1増える
+//   "tsurara"    … つらら／氷の塊（ステージ4）。マグロと同じ動き（まっすぐ速く落ちる）
+//   "penguin"    … ペンギン（ステージ4）。蛇と同じ動き（横にゆれながら雪玉を撃つ）
+//   "shirokuma"  … シロクマ（ステージ4）。鷲と同じ動き（ふらふら動いて撃つ）・硬め
+//   "yukidaruma" … 雪だるま（ステージ4）。ゆっくり下りつつ、たまに自機へ弾を撃つ
 export type EnemyKind =
   | "snail"
   | "snake"
@@ -31,19 +35,25 @@ export type EnemyKind =
   | "jellyfish"
   | "tuna"
   | "squid"
-  | "angel";
+  | "angel"
+  | "tsurara"
+  | "penguin"
+  | "shirokuma"
+  | "yukidaruma";
 
 // ボスの種類
 //   "gorilla"        … ゴリラ（ステージ1）。腕足が動く
 //   "machineGorilla" … 機械のゴリラ（ステージ2）。攻撃が多彩で硬い
 //   "scubaGorilla"   … 酸素ボンベのゴリラ（ステージ3）。機械ゴリラの動き＋たまに突進
-export type BossKind = "gorilla" | "machineGorilla" | "scubaGorilla";
+//   "snowGorilla"    … 白いモコモコのスノーゴリラ（ステージ4）。突進＋つらら降らし
+export type BossKind = "gorilla" | "machineGorilla" | "scubaGorilla" | "snowGorilla";
 
 // 背景のテーマ
 //   "night" … 夜空（星・遠い山・暗い島）
 //   "sky"   … 地球の空（水色・白い雲・海・緑の島）
 //   "sea"   … 海の中（青い水・泡・差し込む光・海藻）
-export type StageTheme = "night" | "sky" | "sea";
+//   "ice"   … 氷の世界（雪原・降る雪・氷山・オーロラ）
+export type StageTheme = "night" | "sky" | "sea" | "ice";
 
 // BGMの種類（実体は audio.ts。ここでは型だけ借りる）
 import type { MusicTrack } from "./audio";
@@ -247,5 +257,75 @@ const STAGE3: Stage = {
   ],
 };
 
+// -------------------------------------------------------------------
+// ステージ4：氷の世界。つらら・ペンギン・シロクマ・雪だるま ＋ スノーゴリラのボス
+//   3面より少し手ごわく（敵が硬め・多め）。エンジェルと黄金の豚も登場。
+// -------------------------------------------------------------------
+const STAGE4: Stage = {
+  name: "STAGE 4",
+  theme: "ice",
+  boss: "snowGorilla",
+  duration: 20.0,
+  normalMusic: "normal4", // きらきら幻想的な道中曲
+  bossMusic: "boss4", // 勇ましく冷たいボス曲
+  timeline: [
+    // 序盤：よちよち動くペンギンで肩慣らし（雪玉を撃ってくる）
+    { time: 1.0, kind: "penguin", x: 0.3 },
+    { time: 1.0, kind: "penguin", x: 0.7 },
+    { time: 2.5, kind: "penguin", x: 0.5 },
+    { time: 3.0, kind: "yukidaruma", x: 0.2 },
+    { time: 3.0, kind: "yukidaruma", x: 0.8 },
+
+    // つららがまっすぐ速く落ちてくる（鋭い・避けにくい）
+    { time: 4.0, kind: "tsurara", x: 0.4 },
+    { time: 4.3, kind: "tsurara", x: 0.6 },
+    // 早めに「下から」突き上げるつららを見せる（中央は避ける）
+    { time: 5.0, kind: "tsurara", x: 0.2, from: "bottom" },
+    { time: 5.0, kind: "tsurara", x: 0.8, from: "bottom" },
+
+    // シロクマ登場（ふらふら動いて撃つ・硬め＝3発）
+    { time: 6.0, kind: "shirokuma", x: 0.5 },
+    { time: 7.0, kind: "penguin", x: 0.25 },
+    { time: 7.0, kind: "penguin", x: 0.75 },
+    { time: 8.0, kind: "shirokuma", x: 0.3 },
+
+    // レアな黄金の豚（このステージに1匹だけ。左から飛んでくる）
+    { time: 8.5, kind: "goldpig", x: 0.0 },
+
+    // 中盤：混ぜて密度を上げる
+    { time: 9.5, kind: "tsurara", x: 0.3 },
+    { time: 9.7, kind: "tsurara", x: 0.5 },
+    { time: 9.9, kind: "tsurara", x: 0.7 },
+    { time: 10.5, kind: "yukidaruma", x: 0.5 },
+
+    // お助けキャラ「エンジェル」（右から登場。触れると残機+1）
+    { time: 11.0, kind: "angel", x: 1.0 },
+
+    { time: 11.5, kind: "shirokuma", x: 0.4 },
+    { time: 11.5, kind: "penguin", x: 0.6 },
+    // 下からつららが突き上げる
+    { time: 12.0, kind: "tsurara", x: 0.35, from: "bottom" },
+    { time: 12.0, kind: "tsurara", x: 0.65, from: "bottom" },
+
+    // 終盤：山場（4種をまぜる）
+    { time: 13.0, kind: "penguin", x: 0.2 },
+    { time: 13.3, kind: "shirokuma", x: 0.5 },
+    { time: 13.6, kind: "penguin", x: 0.8 },
+    { time: 14.0, kind: "tsurara", x: 0.3 },
+    { time: 14.2, kind: "tsurara", x: 0.7 },
+    { time: 14.8, kind: "yukidaruma", x: 0.35 },
+    { time: 14.8, kind: "yukidaruma", x: 0.65 },
+    { time: 15.5, kind: "shirokuma", x: 0.25 },
+    { time: 15.5, kind: "shirokuma", x: 0.75 },
+    { time: 16.0, kind: "tsurara", x: 0.5, from: "bottom" },
+    { time: 16.5, kind: "penguin", x: 0.4 },
+    { time: 16.5, kind: "penguin", x: 0.6 },
+    { time: 17.0, kind: "tsurara", x: 0.2 },
+    { time: 17.2, kind: "tsurara", x: 0.5 },
+    { time: 17.4, kind: "tsurara", x: 0.8 },
+    { time: 18.0, kind: "shirokuma", x: 0.5 },
+  ],
+};
+
 // プレイする順番にステージを並べる（先頭から順に連戦）
-export const STAGES: Stage[] = [STAGE1, STAGE2, STAGE3];
+export const STAGES: Stage[] = [STAGE1, STAGE2, STAGE3, STAGE4];
