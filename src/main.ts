@@ -1300,11 +1300,16 @@ function drawCabbage(cx: number, cy: number): void {
 // -------------------------------------------------------------------
 // 敵その1：カタツムリ（動かない敵）。(cx, cy) が中心。
 // -------------------------------------------------------------------
-function drawSnail(cx: number, cy: number): void {
+function drawSnail(cx: number, cy: number, age: number): void {
   ctx.save();
   ctx.translate(cx, cy);
 
-  // 這う体（クリーム色）
+  // ニュルニュル這う動き：体が前後に伸び縮みする
+  const reach = Math.sin(age * 4) * 0.07;
+
+  // 這う体（クリーム色）。伸び縮みは体と頭だけにかける
+  ctx.save();
+  ctx.scale(1 + reach, 1 - reach * 0.5);
   ctx.fillStyle = "#e8c98f";
   ctx.beginPath();
   ctx.ellipse(-1, 9, 15, 5, 0, 0, Math.PI * 2);
@@ -1313,6 +1318,7 @@ function drawSnail(cx: number, cy: number): void {
   ctx.beginPath();
   ctx.ellipse(11, 3, 6, 6, 0, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
 
   // 殻（うずまき）
   ctx.fillStyle = "#d98a3d";
@@ -1334,20 +1340,21 @@ function drawSnail(cx: number, cy: number): void {
   }
   ctx.stroke();
 
-  // 触角2本＋先っぽの目
+  // 触角2本＋先っぽの目（ゆらゆら揺れる）
+  const sway = Math.sin(age * 2.5) * 1.6;
   ctx.strokeStyle = "#e8c98f";
   ctx.lineWidth = 2;
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.moveTo(13, -1);
-  ctx.lineTo(16, -8);
+  ctx.lineTo(16 + sway, -8);
   ctx.moveTo(10, -2);
-  ctx.lineTo(11, -9);
+  ctx.lineTo(11 + sway * 0.7, -9);
   ctx.stroke();
   ctx.fillStyle = "#1c1208";
   ctx.beginPath();
-  ctx.arc(16, -8, 1.4, 0, Math.PI * 2);
-  ctx.arc(11, -9, 1.4, 0, Math.PI * 2);
+  ctx.arc(16 + sway, -8, 1.4, 0, Math.PI * 2);
+  ctx.arc(11 + sway * 0.7, -9, 1.4, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -1356,9 +1363,13 @@ function drawSnail(cx: number, cy: number): void {
 // -------------------------------------------------------------------
 // 敵その2：蛇（横に動く敵）。(cx, cy) が中心。
 // -------------------------------------------------------------------
-function drawSnake(cx: number, cy: number): void {
+function drawSnake(cx: number, cy: number, age: number): void {
   ctx.save();
   ctx.translate(cx, cy);
+
+  // うねうね動き：S字のふくらみが波打つ
+  const w = Math.sin(age * 6) * 2.5;
+  const headBob = Math.sin(age * 6 + 1) * 1.5;
 
   // くねった胴体（S字）
   ctx.strokeStyle = "#5fb84a";
@@ -1367,8 +1378,8 @@ function drawSnake(cx: number, cy: number): void {
   ctx.lineJoin = "round";
   ctx.beginPath();
   ctx.moveTo(-13, 11);
-  ctx.quadraticCurveTo(3, 7, -3, -1);
-  ctx.quadraticCurveTo(-8, -8, 7, -12);
+  ctx.quadraticCurveTo(3 + w, 7, -3, -1);
+  ctx.quadraticCurveTo(-8 - w, -8, 7, -12 + headBob);
   ctx.stroke();
   // 背中の模様
   ctx.strokeStyle = "#3e8a30";
@@ -1382,27 +1393,31 @@ function drawSnake(cx: number, cy: number): void {
   ctx.lineTo(1, -5);
   ctx.stroke();
 
-  // 頭
+  // 頭（胴体と一緒に上下する）
   ctx.fillStyle = "#6cc456";
   ctx.beginPath();
-  ctx.ellipse(8, -13, 6.5, 5, -0.4, 0, Math.PI * 2);
+  ctx.ellipse(8, -13 + headBob, 6.5, 5, -0.4, 0, Math.PI * 2);
   ctx.fill();
   // 目
   ctx.fillStyle = "#111";
   ctx.beginPath();
-  ctx.arc(10, -15, 1.3, 0, Math.PI * 2);
+  ctx.arc(10, -15 + headBob, 1.3, 0, Math.PI * 2);
   ctx.fill();
-  // 舌（赤いちょろ）
-  ctx.strokeStyle = "#e0506a";
-  ctx.lineWidth = 1.3;
-  ctx.beginPath();
-  ctx.moveTo(13, -14);
-  ctx.lineTo(18, -15);
-  ctx.moveTo(18, -15);
-  ctx.lineTo(20, -16.5);
-  ctx.moveTo(18, -15);
-  ctx.lineTo(20, -13.5);
-  ctx.stroke();
+  // 舌（赤いちょろ）：チロチロ出し入れする
+  const tongueOut = Math.max(0, Math.sin(age * 7)); // 0〜1
+  if (tongueOut > 0.25) {
+    const tl = tongueOut * 4; // 伸びる長さ
+    ctx.strokeStyle = "#e0506a";
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(13, -14 + headBob);
+    ctx.lineTo(15 + tl, -15 + headBob);
+    ctx.moveTo(15 + tl, -15 + headBob);
+    ctx.lineTo(17 + tl, -16.5 + headBob);
+    ctx.moveTo(15 + tl, -15 + headBob);
+    ctx.lineTo(17 + tl, -13.5 + headBob);
+    ctx.stroke();
+  }
 
   ctx.restore();
 }
@@ -1410,19 +1425,25 @@ function drawSnake(cx: number, cy: number): void {
 // -------------------------------------------------------------------
 // 敵その3：蜘蛛（縦に動く敵）。(cx, cy) が中心。上に糸が伸びる。
 // -------------------------------------------------------------------
-function drawSpider(cx: number, cy: number): void {
+function drawSpider(cx: number, cy: number, age: number): void {
   ctx.save();
   ctx.translate(cx, cy);
 
-  // 上に伸びる糸
+  // 糸でゆらゆら：体全体が少し左右に揺れる（糸の根元は固定）
+  const swing = Math.sin(age * 3) * 2.5;
+
+  // 上に伸びる糸（根元はまっすぐ、体の方が揺れる）
   ctx.strokeStyle = "rgba(210, 210, 220, 0.5)";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, -13);
-  ctx.lineTo(0, -42);
+  ctx.moveTo(0, -42);
+  ctx.lineTo(swing, -13);
   ctx.stroke();
 
-  // 8本の脚（左右4本ずつ、ひざで折れる）
+  // 以降の体は揺れに合わせて横へずらす
+  ctx.translate(swing, 0);
+
+  // 8本の脚（左右4本ずつ、ひざで折れる）。ワサワサ動く
   ctx.strokeStyle = "#2b2b33";
   ctx.lineWidth = 2;
   ctx.lineCap = "round";
@@ -1430,10 +1451,11 @@ function drawSpider(cx: number, cy: number): void {
   for (const side of [-1, 1]) {
     for (let i = 0; i < 4; i++) {
       const ly = -6 + i * 4.5;
+      const wig = Math.sin(age * 11 + i * 0.9 + (side > 0 ? Math.PI : 0)) * 2.2;
       ctx.beginPath();
       ctx.moveTo(side * 4, ly);
-      ctx.lineTo(side * 11, ly - 3);
-      ctx.lineTo(side * 16, ly + 4);
+      ctx.lineTo(side * 11, ly - 3 + wig);
+      ctx.lineTo(side * 16, ly + 4 - wig);
       ctx.stroke();
     }
   }
@@ -1626,9 +1648,9 @@ function drawGoldPig(cx: number, cy: number, age: number): void {
 
 // 敵を種類に応じた姿で描く
 function drawEnemy(e: Enemy): void {
-  if (e.kind === "snail") drawSnail(e.x, e.y);
-  else if (e.kind === "snake") drawSnake(e.x, e.y);
-  else if (e.kind === "spider") drawSpider(e.x, e.y);
+  if (e.kind === "snail") drawSnail(e.x, e.y, e.age);
+  else if (e.kind === "snake") drawSnake(e.x, e.y, e.age);
+  else if (e.kind === "spider") drawSpider(e.x, e.y, e.age);
   else if (e.kind === "eagle") drawEagle(e.x, e.y, e.age);
   else drawGoldPig(e.x, e.y, e.age);
 }
