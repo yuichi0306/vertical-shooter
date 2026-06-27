@@ -2013,7 +2013,10 @@ function drawBackground(): void {
     // 夜空：グラデーション → 遠い山 → 星 → 雲 → 近い島
     ctx.fillStyle = skyGradientNight;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    // いちばん奥の山は少しぼかして遠近感（被写界深度）を出す
+    ctx.filter = "blur(2px)";
     for (const d of farHills) drawHill(d);
+    ctx.filter = "none";
     ctx.fillStyle = "#aab4ff";
     for (const s of stars) ctx.fillRect(s.x, s.y, s.size, s.size);
     for (const d of clouds) drawCloud(d);
@@ -2095,24 +2098,49 @@ function render(): void {
 
   // タイトル画面（流れる星の上にタイトルだけ表示）
   if (gameState === "title") {
+    // タイトル文字の裏をうっすら暗くする（背景の島や雲に負けず読めるように）
+    const vcy = HEIGHT / 2 - 50;
+    const vignette = ctx.createRadialGradient(
+      WIDTH / 2, vcy, 20,
+      WIDTH / 2, vcy, 340
+    );
+    vignette.addColorStop(0, "rgba(0, 0, 0, 0.55)");
+    vignette.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
     ctx.textAlign = "center";
+    // タイトル本体（緑のほんのり光るグロー付き）
+    ctx.save();
+    ctx.shadowColor = "rgba(92, 255, 157, 0.7)";
+    ctx.shadowBlur = 18;
     ctx.fillStyle = "#5cff9d";
     ctx.font = "bold 34px monospace";
     ctx.fillText("VERTICAL", WIDTH / 2, HEIGHT / 2 - 70);
     ctx.fillText("SHOOTER", WIDTH / 2, HEIGHT / 2 - 30);
+    ctx.restore();
+
     ctx.fillStyle = "#ffffff";
     ctx.font = "16px monospace";
     ctx.fillText(`HI-SCORE  ${highScore}`, WIDTH / 2, HEIGHT / 2 + 20);
+
+    // スタート案内をゆっくり点滅させて「押せる感」を出す
+    const blink = (Math.sin(performance.now() / 350) + 1) / 2; // 0〜1
+    ctx.save();
+    ctx.globalAlpha = 0.35 + blink * 0.65;
+    ctx.font = "16px monospace";
+    ctx.fillText(
+      showTouchControls ? "タップでスタート" : "Z / Space でスタート",
+      WIDTH / 2,
+      HEIGHT / 2 + 60
+    );
+    ctx.restore();
+
+    ctx.font = "12px monospace";
     if (showTouchControls) {
-      // スマホ：タッチ操作の案内
-      ctx.fillText("タップでスタート", WIDTH / 2, HEIGHT / 2 + 60);
-      ctx.font = "12px monospace";
       ctx.fillText("移動: 左下のパッド", WIDTH / 2, HEIGHT - 52);
       ctx.fillText("ショット・ボム: 右下のボタン", WIDTH / 2, HEIGHT - 34);
     } else {
-      // パソコン：キーボード操作の案内
-      ctx.fillText("Z / Space でスタート", WIDTH / 2, HEIGHT / 2 + 60);
-      ctx.font = "12px monospace";
       ctx.fillText("移動: 矢印/WASD   ショット: Z/Space", WIDTH / 2, HEIGHT - 52);
       ctx.fillText("ボム（緊急回避）: X / Shift", WIDTH / 2, HEIGHT - 34);
     }
@@ -2217,18 +2245,76 @@ function render(): void {
   // ここでゲーム世界の揺れを終了（以降のHUDや決着表示は揺らさない）
   ctx.restore();
 
-  // 画面の文字に薄い影をつける（明るい空テーマでも白文字が埋もれず読める）
-  ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
-  ctx.shadowBlur = 4;
+  // プレイ中の情報表示（スコア・残機・パワー・ボム）を角丸パネルにまとめる
+  const hudX = 10;
+  const hudY = 12;
+  const hudW = 176;
+  const hudH = 118;
+  // 半透明の角丸パネル（どんな背景でも読めるように）
+  ctx.fillStyle = "rgba(8, 12, 24, 0.55)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(hudX, hudY, hudW, hudH, 10);
+  ctx.fill();
+  ctx.stroke();
 
-  // プレイ中の情報表示（スコア・残機・パワー）
+  // 文字に薄い影（明るい空テーマでも読める）
+  ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+  ctx.shadowBlur = 3;
+  const tx = hudX + 12;
+
+  // SCORE（いちばん目立たせる）
   ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 18px monospace";
+  ctx.fillText(`${score}`, tx, hudY + 26);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+  ctx.font = "10px monospace";
+  ctx.fillText("SCORE", tx + 1, hudY + 38);
+  // HI-SCORE（控えめに右側へ）
+  ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
+  ctx.font = "11px monospace";
+  ctx.fillText(`HI ${highScore}`, tx + 78, hudY + 24);
+
+  // 残機（ハート）
   ctx.font = "14px monospace";
-  ctx.fillText(`SCORE ${score}`, 10, 38);
-  ctx.fillText(`HI ${highScore}`, 10, 56);
-  ctx.fillText(`Lives: ${"▲".repeat(Math.max(0, player.lives))}`, 10, 74);
-  ctx.fillText(`Power: ${player.power} / ${POWER_MAX}`, 10, 92);
-  ctx.fillText(`Bomb: ${player.bombs > 0 ? "●".repeat(player.bombs) : "なし"}`, 10, 110);
+  ctx.fillStyle = "#ff5c7a";
+  ctx.fillText("♥".repeat(Math.max(0, player.lives)) || "—", tx, hudY + 60);
+
+  // パワー（3段の小さなバー）
+  ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+  ctx.font = "10px monospace";
+  ctx.fillText("POWER", tx, hudY + 80);
+  for (let i = 0; i < POWER_MAX; i++) {
+    const bx = tx + 48 + i * 22;
+    const filled = i < player.power;
+    ctx.fillStyle = filled ? "#7be0ff" : "rgba(255, 255, 255, 0.18)";
+    ctx.beginPath();
+    ctx.roundRect(bx, hudY + 71, 18, 9, 3);
+    ctx.fill();
+  }
+
+  // ボム（今ある数だけ黄色い丸。多いときは6個＋数字で表示）
+  ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+  ctx.font = "10px monospace";
+  ctx.fillText("BOMB", tx, hudY + 102);
+  const bombDots = Math.min(player.bombs, 6);
+  for (let i = 0; i < bombDots; i++) {
+    const bx = tx + 48 + i * 14;
+    ctx.beginPath();
+    ctx.arc(bx + 5, hudY + 98, 5, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffd23b";
+    ctx.fill();
+  }
+  if (player.bombs === 0) {
+    ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+    ctx.font = "11px monospace";
+    ctx.fillText("なし", tx + 48, hudY + 102);
+  } else if (player.bombs > 6) {
+    ctx.fillStyle = "#ffd23b";
+    ctx.font = "11px monospace";
+    ctx.fillText(`+${player.bombs - 6}`, tx + 48 + 6 * 14, hudY + 102);
+  }
 
   // ステージ開始時のバナー（「STAGE 2」など）。ボスがいない間だけ表示。
   if (stageBanner > 0 && !boss) {
