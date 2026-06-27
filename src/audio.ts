@@ -121,6 +121,13 @@ export function playHit(): void {
   noise(0.3, 0.2);
 }
 
+// 回復（エンジェルに触れて残機+1）：やわらかく上がっていく「キラッ」という和音
+export function playHeal(): void {
+  tone(660, 0.18, "sine", 0.16, 990); // ミ→上がる
+  setTimeout(() => tone(880, 0.22, "sine", 0.16, 1320), 90); // ラ→さらに上へ
+  setTimeout(() => tone(1320, 0.25, "triangle", 0.12), 180); // きらめきの余韻
+}
+
 // ボム発動：低音の轟き＋広がるノイズの「ドゴォン」
 export function playBomb(): void {
   tone(180, 0.5, "sawtooth", 0.22, 40); // 地響きの低音

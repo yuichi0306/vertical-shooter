@@ -5,7 +5,7 @@
 // ===================================================================
 
 import { STAGES, type EnemyKind, type BossKind, type StageTheme } from "./stage";
-import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion, playBomb, setMusic } from "./audio";
+import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion, playBomb, playHeal, setMusic } from "./audio";
 
 // ゲーム内部の解像度（座標はすべてこのサイズを基準に書く）
 const WIDTH = 480;
@@ -514,6 +514,12 @@ const TUNA_SPEED = 260; // マグロ：まっすぐ速く下りる速さ（黄�
 // クラゲは「蛇と同じ動き」、イカは「鷲と同じ動き」なので専用の定数は不要
 // （クラゲ＝snakeの定数、イカ＝eagleの定数をそのまま使う）
 
+// エンジェル（お助けキャラ）：黄金の豚と同じく横切りつつ、上下にも大きく動く
+const ANGEL_SPEED = 110; // 画面を横切る速さ（px/秒）
+const ANGEL_Y = 200; // 上下の動きの中心の高さ
+const ANGEL_AMP = 90; // 上下の動きの大きさ（px）。豚より大きく上下する
+const MAX_LIVES = 5; // 残機の上限（エンジェルで増えすぎないように）
+
 // 種類ごとの爆発の色（撃破エフェクト用）
 const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
   snail: "#e8c98f", // カタツムリ＝クリーム色
@@ -524,6 +530,7 @@ const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
   jellyfish: "#ff9ed8", // クラゲ＝うすピンク
   tuna: "#8fb8d6", // マグロ＝青銀
   squid: "#d98fe0", // イカ＝うす紫
+  angel: "#fff3b0", // エンジェル＝淡い金（※倒さないので通常は未使用）
 };
 
 // kind … 敵の種類、baseX … 揺れの基準になる横位置、age … 出現からの経過秒
@@ -569,6 +576,12 @@ function spawnEnemy(kind: EnemyKind, xRatio: number): void {
     vx = (fromLeft ? 1 : -1) * GOLDPIG_SPEED;
     x = fromLeft ? -ENEMY_RADIUS : WIDTH + ENEMY_RADIUS;
     y = GOLDPIG_Y;
+  } else if (kind === "angel") {
+    // エンジェル：黄金の豚と同じく画面外から横切る（上下にも大きく動く）
+    const fromLeft = xRatio < 0.5;
+    vx = (fromLeft ? 1 : -1) * ANGEL_SPEED;
+    x = fromLeft ? -ENEMY_RADIUS : WIDTH + ENEMY_RADIUS;
+    y = ANGEL_Y;
   }
   enemies.push({ x, y, hp, kind, baseX: x, age: 0, fireTimer, vx, vy, wanderTimer: 0 });
 }
@@ -837,12 +850,15 @@ function useBomb(): void {
   playBomb();
 
   // 画面内の雑魚を全部倒す（爆発と得点つき。アイテムは出ない）
-  for (const e of enemies) {
+  // ※エンジェル（お助けキャラ）は巻き込まず残す
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    if (e.kind === "angel") continue; // エンジェルは残す
     spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 14);
     score += e.kind === "goldpig" ? SCORE_ENEMY * 2 : SCORE_ENEMY;
     defeated += 1;
+    enemies.splice(i, 1);
   }
-  enemies.length = 0;
 
   // 飛んでいる敵弾を全部消す（緊急回避）
   enemyBullets.length = 0;
@@ -1124,6 +1140,10 @@ function update(dt: number): void {
       // 黄金の豚：画面を横切りながら、ふわふわ上下に揺れて飛ぶ（横に出たら退場）
       e.x += e.vx * dt;
       e.y = GOLDPIG_Y + Math.sin(e.age * 2.5) * 24;
+    } else if (e.kind === "angel") {
+      // エンジェル：画面を横切りつつ、上下に大きくゆったり動く（横に出たら退場）
+      e.x += e.vx * dt;
+      e.y = ANGEL_Y + Math.sin(e.age * 2.2) * ANGEL_AMP;
     } else {
       // 鷲・イカ：一定時間ごとに進む向きをランダムに変えて、ふらふら動き回る。
       // 横は気まぐれ、縦は必ず少しずつ下りる（いつか画面外へ出る）。
@@ -1158,6 +1178,7 @@ function update(dt: number): void {
     const b = bullets[bi];
     for (let ei = enemies.length - 1; ei >= 0; ei--) {
       const e = enemies[ei];
+      if (e.kind === "angel") continue; // エンジェルはお助けキャラ：弾は素通り
       if (hit(b.x, b.y, BULLET_RADIUS, e.x, e.y, ENEMY_RADIUS)) {
         bullets.splice(bi, 1); // 弾は消える
         e.hp -= 1;
@@ -1200,10 +1221,23 @@ function update(dt: number): void {
     }
   }
 
-  // --- 当たり判定：敵 × 自機（無敵中は当たらない）---
+  // --- お助けキャラ：エンジェルに触れると残機+1（無敵中でも拾える）---
+  for (let ei = enemies.length - 1; ei >= 0; ei--) {
+    const e = enemies[ei];
+    if (e.kind !== "angel") continue;
+    if (hit(player.x, player.y, PLAYER_RADIUS, e.x, e.y, ENEMY_RADIUS)) {
+      enemies.splice(ei, 1);
+      if (player.lives < MAX_LIVES) player.lives += 1; // ハートが1増える（上限あり）
+      spawnExplosion(e.x, e.y, "#fff3b0", 18); // 淡い金のキラキラ
+      playHeal();
+    }
+  }
+
+  // --- 当たり判定：敵 × 自機（無敵中は当たらない。エンジェルは対象外）---
   if (player.invincible <= 0) {
     for (let ei = enemies.length - 1; ei >= 0; ei--) {
       const e = enemies[ei];
+      if (e.kind === "angel") continue; // お助けキャラはダメージを与えない
       if (hit(player.x, player.y, PLAYER_RADIUS, e.x, e.y, ENEMY_RADIUS)) {
         enemies.splice(ei, 1); // ぶつかった敵は壊れる
         damagePlayer();
@@ -1986,6 +2020,82 @@ function drawSquid(cx: number, cy: number, age: number): void {
   ctx.restore();
 }
 
+// -------------------------------------------------------------------
+// お助けキャラ：エンジェル（ステージ2）。(cx, cy) が中心。age で羽ばたき＋きらめき。
+//   触れると残機(ハート)が1増える。倒す相手ではない。
+// -------------------------------------------------------------------
+function drawAngel(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const flap = Math.sin(age * 9) * 4; // 翼の羽ばたき
+  const pulse = 0.5 + 0.5 * Math.sin(age * 5);
+
+  // やわらかい光のオーラ（神々しさ）
+  ctx.save();
+  ctx.globalAlpha = 0.15 + pulse * 0.12;
+  ctx.fillStyle = "#fff6c0";
+  ctx.beginPath();
+  ctx.arc(0, 0, 22, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // 翼（左右の白い羽。羽ばたく）
+  ctx.fillStyle = "#ffffff";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 5, -2);
+    ctx.quadraticCurveTo(side * 20, -10 - flap, side * 24, 2 - flap);
+    ctx.quadraticCurveTo(side * 16, 2, side * 6, 6);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 体（白いローブ）
+  ctx.fillStyle = "#fdfdff";
+  ctx.beginPath();
+  ctx.moveTo(0, -4);
+  ctx.lineTo(-7, 12);
+  ctx.lineTo(7, 12);
+  ctx.closePath();
+  ctx.fill();
+
+  // 頭（肌色の丸）
+  ctx.fillStyle = "#ffe0c2";
+  ctx.beginPath();
+  ctx.arc(0, -8, 6, 0, Math.PI * 2);
+  ctx.fill();
+  // 目（にっこり）
+  ctx.fillStyle = "#5a4636";
+  ctx.beginPath();
+  ctx.arc(-2.3, -8, 1, 0, Math.PI * 2);
+  ctx.arc(2.3, -8, 1, 0, Math.PI * 2);
+  ctx.fill();
+  // ほっぺ
+  ctx.fillStyle = "rgba(255, 150, 150, 0.5)";
+  ctx.beginPath();
+  ctx.arc(-3.5, -6, 1.4, 0, Math.PI * 2);
+  ctx.arc(3.5, -6, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 天使の輪（頭の上で光る）
+  ctx.strokeStyle = "#ffe14d";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(0, -16, 5, 2, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // 小さなハートマーク（胸元・お助け感）
+  ctx.fillStyle = "#ff6b8a";
+  ctx.beginPath();
+  ctx.moveTo(0, 4);
+  ctx.bezierCurveTo(-3, 0, -5, 4, 0, 8);
+  ctx.bezierCurveTo(5, 4, 3, 0, 0, 4);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 // 敵を種類に応じた姿で描く
 function drawEnemy(e: Enemy): void {
   if (e.kind === "snail") drawSnail(e.x, e.y, e.age);
@@ -1995,6 +2105,7 @@ function drawEnemy(e: Enemy): void {
   else if (e.kind === "jellyfish") drawJellyfish(e.x, e.y, e.age);
   else if (e.kind === "tuna") drawTuna(e.x, e.y, e.age);
   else if (e.kind === "squid") drawSquid(e.x, e.y, e.age);
+  else if (e.kind === "angel") drawAngel(e.x, e.y, e.age);
   else drawGoldPig(e.x, e.y, e.age);
 }
 

@@ -20,6 +20,8 @@
 //   "jellyfish" … クラゲ（ステージ3）。蛇と同じ動き（くねりながら弾を撃つ）
 //   "tuna"      … マグロ（ステージ3）。まっすぐしか進まないが速い（黄金の豚の2倍速）
 //   "squid"     … イカ（ステージ3）。鷲と同じ動き（ふらふら動いて弾を撃つ）
+//   "angel"     … エンジェル（お助けキャラ／ステージ2）。黄金の豚＋上下の動きで横切る。
+//                 倒す相手ではなく、触れると残機(ハート)が1増える
 export type EnemyKind =
   | "snail"
   | "snake"
@@ -28,7 +30,8 @@ export type EnemyKind =
   | "goldpig"
   | "jellyfish"
   | "tuna"
-  | "squid";
+  | "squid"
+  | "angel";
 
 // ボスの種類
 //   "gorilla"        … ゴリラ（ステージ1）。腕足が動く
@@ -145,6 +148,10 @@ const STAGE2: Stage = {
     // 中盤：混ぜる
     { time: 9.5, kind: "snake", x: 0.4 },
     { time: 9.5, kind: "snake", x: 0.6 },
+
+    // お助けキャラ「エンジェル」（左から登場。触れると残機+1）
+    { time: 10.0, kind: "angel", x: 0.0 },
+
     { time: 11.0, kind: "eagle", x: 0.5 },
     { time: 11.0, kind: "spider", x: 0.5 },
 
