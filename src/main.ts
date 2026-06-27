@@ -604,13 +604,14 @@ function spawnEnemy(kind: EnemyKind, xRatio: number, from: "top" | "bottom" = "t
 function fireShot(): void {
   const y = player.y - 16;
   if (player.power >= 4) {
-    // 4段階：3段階と同じ広がり方のまま、弾を6発に増やした扇（最強）
+    // 4段階：前方に3つに分かれる弾（正面＋左右ななめ＝当初の3段階の形）
+    //        ＋後方に2つに分かれる弾（左右に開いて下へ）
+    const back = player.y + 16; // 後方（下）の発射位置
+    bullets.push({ x: player.x, y, vx: 0, vy: -BULLET_SPEED });
     bullets.push({ x: player.x, y, vx: -150, vy: -BULLET_SPEED });
-    bullets.push({ x: player.x, y, vx: -90, vy: -BULLET_SPEED });
-    bullets.push({ x: player.x, y, vx: -30, vy: -BULLET_SPEED });
-    bullets.push({ x: player.x, y, vx: 30, vy: -BULLET_SPEED });
-    bullets.push({ x: player.x, y, vx: 90, vy: -BULLET_SPEED });
     bullets.push({ x: player.x, y, vx: 150, vy: -BULLET_SPEED });
+    bullets.push({ x: player.x, y: back, vx: -120, vy: BULLET_SPEED });
+    bullets.push({ x: player.x, y: back, vx: 120, vy: BULLET_SPEED });
   } else if (player.power === 3) {
     // 3段階：正面 + 左右に少し開く3way
     bullets.push({ x: player.x, y, vx: 0, vy: -BULLET_SPEED });
@@ -625,9 +626,10 @@ function fireShot(): void {
     bullets.push({ x: player.x, y, vx: 0, vy: -BULLET_SPEED });
   }
 
-  // 5段階：お供の小亀がその位置からまっすぐレーザーを撃つ（本体の弾に追加）
+  // 5段階：お供の小亀がその位置から前後（上下）にまっすぐレーザーを撃つ
   if (player.power >= 5 && optionTurtle.active) {
     bullets.push({ x: optionTurtle.x, y: optionTurtle.y - 12, vx: 0, vy: -LASER_SPEED, laser: true });
+    bullets.push({ x: optionTurtle.x, y: optionTurtle.y + 12, vx: 0, vy: LASER_SPEED, laser: true });
   }
 }
 
@@ -1136,10 +1138,12 @@ function update(dt: number): void {
     b.x += b.vx * dt;
     b.y += b.vy * dt;
   }
-  // 画面の外（上・左右）に出た弾を消す
+  // 画面の外（上・下・左右）に出た弾を消す（後方ショット・下向きレーザー対応）
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
-    if (b.y < -10 || b.x < -10 || b.x > WIDTH + 10) bullets.splice(i, 1);
+    if (b.y < -10 || b.y > HEIGHT + 10 || b.x < -10 || b.x > WIDTH + 10) {
+      bullets.splice(i, 1);
+    }
   }
 
   // ステージ名のバナー表示を時間で消していく
