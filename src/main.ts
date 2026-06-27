@@ -2942,8 +2942,11 @@ function render(): void {
     ctx.shadowBlur = 18;
     ctx.fillStyle = "#5cff9d";
     ctx.font = "bold 40px sans-serif";
-    ctx.fillText("ゴリラ、", WIDTH / 2, HEIGHT / 2 - 70);
-    ctx.fillText("また来た。", WIDTH / 2, HEIGHT / 2 - 24);
+    // 末尾の句読点（「、」「。」）は字面が左下に寄っていて右に余白ができる。
+    // そのぶん右へ少しずらして「見た目の中央」に揃える
+    const punctNudge = ctx.measureText("。").width * 0.3;
+    ctx.fillText("ゴリラ、", WIDTH / 2 + punctNudge, HEIGHT / 2 - 70);
+    ctx.fillText("また来た。", WIDTH / 2 + punctNudge, HEIGHT / 2 - 24);
     ctx.restore();
 
     ctx.fillStyle = "#ffffff";
