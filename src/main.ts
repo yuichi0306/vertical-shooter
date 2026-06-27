@@ -401,13 +401,22 @@ const FIRE_INTERVAL = 0.12; // 連射の間隔（秒）。小さいほど速く�
 
 const BULLET_RADIUS = 4; // 当たり判定用の半径
 // vx/vy … 1秒あたりに進む量（拡散ショットで斜めに飛ばすために向きを持たせる）
-type Bullet = { x: number; y: number; vx: number; vy: number };
+// laser … true のときは「お供の小亀」が撃つまっすぐなレーザー（見た目が細い光の柱）
+type Bullet = { x: number; y: number; vx: number; vy: number; laser?: boolean };
 const bullets: Bullet[] = [];
 
 // パワーアップ
-const POWER_MAX = 4; // 最大強化段階
+const POWER_MAX = 5; // 最大強化段階
 const MAX_BOMBS = 9; // ボムの最大ストック数（拾いすぎ防止）
-const ITEM_DROP_RATE = 0.15; // 敵撃破時にアイテムが出る確率（0.15 = 15%）
+
+// 5段階目の「お供の小亀（オプション）」
+//   自機の近くに現れ、移動するとなめらかについてくる。撃つたびにレーザーを出す。
+const OPTION_OFFSET_X = -30; // 自機からの定位置（左に少し）
+const OPTION_OFFSET_Y = -6; // 自機からの定位置（少し上）
+const OPTION_FOLLOW = 9; // 追従のなめらかさ（大きいほど速く追いつく）
+const LASER_SPEED = 760; // レーザーが上へ進む速さ（px/秒）。通常弾より速い
+const optionTurtle = { x: player.x, y: player.y, active: false };
+const ITEM_DROP_RATE = 0.1; // 敵撃破時にアイテムが出る確率（0.1 = 10%）
 const ITEM_RADIUS = 10; // アイテムの大きさ／当たり判定
 const ITEM_SPEED = 90; // アイテムが下りる速さ（px/秒）
 
@@ -609,6 +618,11 @@ function fireShot(): void {
   } else {
     // 1段階：正面に1発
     bullets.push({ x: player.x, y, vx: 0, vy: -BULLET_SPEED });
+  }
+
+  // 5段階：お供の小亀がその位置からまっすぐレーザーを撃つ（本体の弾に追加）
+  if (player.power >= 5 && optionTurtle.active) {
+    bullets.push({ x: optionTurtle.x, y: optionTurtle.y - 12, vx: 0, vy: -LASER_SPEED, laser: true });
   }
 }
 
@@ -935,6 +949,7 @@ function resetGame(): void {
   player.invincible = 0;
   player.power = 1;
   player.lean = 0;
+  optionTurtle.active = false; // お供の小亀はリセット（5段階で再び出現）
   player.bombs = START_BOMBS;
   bombFlash = 0;
   bombKeyWasDown = false;
@@ -1078,6 +1093,23 @@ function update(dt: number): void {
   // 画面の外に出ないように位置を制限する
   player.x = Math.max(PLAYER_RADIUS, Math.min(WIDTH - PLAYER_RADIUS, player.x));
   player.y = Math.max(PLAYER_RADIUS, Math.min(HEIGHT - PLAYER_RADIUS, player.y));
+
+  // --- お供の小亀（5段階目）：自機の定位置へなめらかについてくる ---
+  if (player.power >= 5) {
+    const tx = player.x + OPTION_OFFSET_X;
+    const ty = player.y + OPTION_OFFSET_Y;
+    if (!optionTurtle.active) {
+      // 出現した瞬間は定位置にパッと現れる（画面の外から飛んでこない）
+      optionTurtle.x = tx;
+      optionTurtle.y = ty;
+      optionTurtle.active = true;
+    }
+    const k = Math.min(1, dt * OPTION_FOLLOW);
+    optionTurtle.x += (tx - optionTurtle.x) * k;
+    optionTurtle.y += (ty - optionTurtle.y) * k;
+  } else {
+    optionTurtle.active = false;
+  }
 
   // --- ショット（キー or タッチのショットボタン）---
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
@@ -1465,6 +1497,69 @@ function drawPlayerGiraffeTurtle(cx: number, cy: number, lean = 0): void {
   ctx.fillStyle = "#1c1208";
   ctx.beginPath();
   ctx.arc(5, -23, 1.1, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// お供の小亀（5段階目のオプション）を描く。(cx, cy) が中心。
+// 自機の亀をぐっと小さくした、頭が上を向いた緑の子亀。
+// -------------------------------------------------------------------
+function drawMiniTurtle(cx: number, cy: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(0.62, 0.62); // 自機よりひと回り小さく
+
+  // 4枚のひれ
+  ctx.fillStyle = "#2e7d43";
+  const flippers: [number, number, number][] = [
+    [-9, 0, -0.7],
+    [9, 0, 0.7],
+    [-8, 9, 0.5],
+    [8, 9, -0.5],
+  ];
+  for (const [fx, fy, rot] of flippers) {
+    ctx.beginPath();
+    ctx.ellipse(fx, fy, 3.4, 2.2, rot, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // しっぽ
+  ctx.beginPath();
+  ctx.moveTo(-2.5, 10);
+  ctx.lineTo(2.5, 10);
+  ctx.lineTo(0, 15);
+  ctx.closePath();
+  ctx.fill();
+
+  // 甲羅（緑のドーム）
+  ctx.fillStyle = "#3fae5a";
+  ctx.beginPath();
+  ctx.ellipse(0, 4, 10, 7.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = "#2e7d43";
+  ctx.stroke();
+  // 甲羅の模様
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, -2.5);
+  ctx.lineTo(0, 10.5);
+  ctx.moveTo(-7.5, 4);
+  ctx.lineTo(-1.5, 4);
+  ctx.moveTo(1.5, 4);
+  ctx.lineTo(7.5, 4);
+  ctx.stroke();
+
+  // 頭（上を向く）＋目
+  ctx.fillStyle = "#2e7d43";
+  ctx.beginPath();
+  ctx.ellipse(0, -8, 4.5, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#1c1208";
+  ctx.beginPath();
+  ctx.arc(-1.7, -9, 0.9, 0, Math.PI * 2);
+  ctx.arc(1.7, -9, 0.9, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -2921,6 +3016,20 @@ function render(): void {
   ctx.shadowColor = "#ffe14d";
   ctx.shadowBlur = 9;
   for (const b of bullets) {
+    if (b.laser) {
+      // お供の小亀のレーザー：細くて長い水色の光の柱
+      ctx.shadowColor = "#7df9ff";
+      ctx.fillStyle = "#8bf6ff";
+      ctx.beginPath();
+      ctx.roundRect(b.x - 2.5, b.y - 16, 5, 30, 2.5);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.roundRect(b.x - 1, b.y - 14, 2, 26, 1);
+      ctx.fill();
+      ctx.shadowColor = "#ffe14d"; // 元の黄色いグローに戻す
+      continue;
+    }
     // 外側：丸みのある黄色いカプセル
     ctx.fillStyle = "#ffd23b";
     ctx.beginPath();
@@ -2940,6 +3049,11 @@ function render(): void {
     player.invincible <= 0 || Math.floor(player.invincible * 10) % 2 === 0;
   if (gameState !== "gameover" && blinkVisible) {
     drawPlayerGiraffeTurtle(player.x, player.y, player.lean);
+  }
+
+  // お供の小亀（5段階目）。自機の近くにふわっと付き従う
+  if (gameState !== "gameover" && optionTurtle.active) {
+    drawMiniTurtle(optionTurtle.x, optionTurtle.y);
   }
 
   // ボムの閃光（画面全体が白く光り、衝撃波の輪が広がる）
