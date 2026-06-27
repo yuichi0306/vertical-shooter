@@ -946,6 +946,16 @@ function damagePlayer(): void {
   }
 }
 
+// 雪だるまは倒されると爆発する。爆風の範囲は当たり判定(ENEMY_RADIUS)の1.5倍。
+// その範囲内に自機がいれば被弾する（近くで倒すと危ない）。無敵中はノーダメージ。
+function snowmanExplode(x: number, y: number): void {
+  const radius = ENEMY_RADIUS * 1.5; // 爆風の半径（約21px）
+  spawnExplosion(x, y, "#dff0fb", 26); // 白い大きめの爆風エフェクト
+  if (player.invincible <= 0 && hit(x, y, radius, player.x, player.y, PLAYER_RADIUS)) {
+    damagePlayer();
+  }
+}
+
 // ボム発動：画面全体を攻撃し、敵弾を消し、しばらく無敵になる
 function useBomb(): void {
   player.bombs -= 1;
@@ -960,6 +970,8 @@ function useBomb(): void {
     const e = enemies[i];
     if (e.kind === "angel") continue; // エンジェルは残す
     spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 14);
+    // 雪だるまは倒されると爆発（ボム発動中は無敵なので自機ダメージなし）
+    if (e.kind === "yukidaruma") snowmanExplode(e.x, e.y);
     score += e.kind === "goldpig" ? SCORE_ENEMY * 2 : SCORE_ENEMY;
     defeated += 1;
     enemies.splice(i, 1);
@@ -1349,6 +1361,8 @@ function update(dt: number): void {
             }
           }
           playExplosion();
+          // 雪だるまは倒されると爆発（範囲内の自機にダメージ）
+          if (e.kind === "yukidaruma") snowmanExplode(e.x, e.y);
         }
         break; // この弾はもう消えたので、次の弾へ
       }
