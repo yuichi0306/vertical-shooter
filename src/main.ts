@@ -405,7 +405,7 @@ type Bullet = { x: number; y: number; vx: number; vy: number };
 const bullets: Bullet[] = [];
 
 // パワーアップ
-const POWER_MAX = 3; // 最大強化段階
+const POWER_MAX = 4; // 最大強化段階
 const MAX_BOMBS = 9; // ボムの最大ストック数（拾いすぎ防止）
 const ITEM_DROP_RATE = 0.15; // 敵撃破時にアイテムが出る確率（0.15 = 15%）
 const ITEM_RADIUS = 10; // アイテムの大きさ／当たり判定
@@ -589,7 +589,15 @@ function spawnEnemy(kind: EnemyKind, xRatio: number): void {
 // 自機のショットを撃つ。強化段階で弾の数と広がりが変わる。
 function fireShot(): void {
   const y = player.y - 16;
-  if (player.power >= 3) {
+  if (player.power >= 4) {
+    // 4段階：3段階と同じ広がり方のまま、弾を6発に増やした扇（最強）
+    bullets.push({ x: player.x, y, vx: -150, vy: -BULLET_SPEED });
+    bullets.push({ x: player.x, y, vx: -90, vy: -BULLET_SPEED });
+    bullets.push({ x: player.x, y, vx: -30, vy: -BULLET_SPEED });
+    bullets.push({ x: player.x, y, vx: 30, vy: -BULLET_SPEED });
+    bullets.push({ x: player.x, y, vx: 90, vy: -BULLET_SPEED });
+    bullets.push({ x: player.x, y, vx: 150, vy: -BULLET_SPEED });
+  } else if (player.power === 3) {
     // 3段階：正面 + 左右に少し開く3way
     bullets.push({ x: player.x, y, vx: 0, vy: -BULLET_SPEED });
     bullets.push({ x: player.x, y, vx: -150, vy: -BULLET_SPEED });
