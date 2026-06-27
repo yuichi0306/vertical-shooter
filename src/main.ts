@@ -262,6 +262,29 @@ function updateIslands(dt: number): void {
   }
 }
 
+// 海の中の泡（ステージ3）。下から上へ立ちのぼり、上に出たら下へ戻る。
+const bubbles: Deco[] = [];
+for (let i = 0; i < 18; i++) {
+  bubbles.push({
+    x: Math.random() * WIDTH,
+    y: Math.random() * HEIGHT,
+    scale: 0.5 + Math.random() * 1.1,
+    speed: 25 + Math.random() * 50, // 大きい泡ほど速く昇る傾向
+  });
+}
+
+// 泡を上へ動かす。左右にゆらゆら揺れながら昇る。上に出たら下から出し直す。
+function updateBubbles(dt: number): void {
+  for (const d of bubbles) {
+    d.y -= d.speed * dt;
+    d.x += Math.sin((d.y + d.speed) * 0.03) * 12 * dt; // ゆらゆら横揺れ
+    if (d.y < -10) {
+      d.y = HEIGHT + 10;
+      d.x = Math.random() * WIDTH;
+    }
+  }
+}
+
 // 夜空のグラデーション（上＝濃い闇、下＝少し明るい地平線）。一度だけ作る。
 const skyGradientNight = ctx.createLinearGradient(0, 0, 0, HEIGHT);
 skyGradientNight.addColorStop(0, "#05050f");
@@ -273,6 +296,12 @@ const skyGradientDay = ctx.createLinearGradient(0, 0, 0, HEIGHT);
 skyGradientDay.addColorStop(0, "#4aa3df"); // 上空の青
 skyGradientDay.addColorStop(0.5, "#8fd0f0"); // 水色の空
 skyGradientDay.addColorStop(1, "#bfe9ff"); // 下＝明るい海面
+
+// 海の中のグラデーション（上＝光のとどく水色、下＝深い藍）。一度だけ作る。
+const skyGradientSea = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+skyGradientSea.addColorStop(0, "#2aa7c4"); // 水面に近い明るい水色
+skyGradientSea.addColorStop(0.5, "#136a93"); // 中ほどの青
+skyGradientSea.addColorStop(1, "#062744"); // 深い藍
 
 // 今の背景テーマ（ステージごとに切り替わる）。起動時／タイトルは夜空。
 let theme: StageTheme = "night";
@@ -449,6 +478,12 @@ type Boss = {
   spinAngle: number; // うずまき攻撃用の回転角度
   moveTime: number; // 前後（上下）移動用にたまっていく時間
   enraged: boolean; // 怒りモードに入ったか（HP半分以下で true）
+  // --- 突進（酸素ボンベのゴリラ専用）---
+  chargeState: "none" | "windup" | "dash" | "back"; // 突進の段階
+  chargeTimer: number; // 次の突進までの残り秒（none の間に減る）
+  chargeStateTimer: number; // windup（ためる）の残り秒
+  chargeVX: number; // 突進中の速度（x）
+  chargeVY: number; // 突進中の速度（y）
 };
 let boss: Boss | null = null;
 let bossSpawned = false; // このステージで既にボスを出したか
@@ -474,6 +509,10 @@ const EAGLE_FIRE_INTERVAL = 2.0; // 鷲：弾を撃つ間隔（秒）
 const GOLDPIG_HP = 5; // 黄金の豚：硬い（5発で撃破）
 const GOLDPIG_SPEED = 130; // 黄金の豚：画面を横切る速さ（px/秒）
 const GOLDPIG_Y = 95; // 黄金の豚：飛ぶ高さ（中心）
+const TUNA_SPEED = 260; // マグロ：まっすぐ速く下りる速さ（黄金の豚の2倍）
+
+// クラゲは「蛇と同じ動き」、イカは「鷲と同じ動き」なので専用の定数は不要
+// （クラゲ＝snakeの定数、イカ＝eagleの定数をそのまま使う）
 
 // 種類ごとの爆発の色（撃破エフェクト用）
 const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
@@ -482,6 +521,9 @@ const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
   spider: "#d2453f", // 蜘蛛＝赤
   eagle: "#b5793a", // 鷲＝こげ茶
   goldpig: "#ffd34d", // 黄金の豚＝金色
+  jellyfish: "#ff9ed8", // クラゲ＝うすピンク
+  tuna: "#8fb8d6", // マグロ＝青銀
+  squid: "#d98fe0", // イカ＝うす紫
 };
 
 // kind … 敵の種類、baseX … 揺れの基準になる横位置、age … 出現からの経過秒
@@ -515,7 +557,8 @@ function spawnEnemy(kind: EnemyKind, xRatio: number): void {
   let hp = ENEMY_HP;
   let vx = 0;
   let vy = 0;
-  if (kind === "eagle") {
+  if (kind === "eagle" || kind === "squid") {
+    // イカは鷲と同じ動き（ふらふら動いて撃つ）
     hp = EAGLE_HP;
     fireTimer = EAGLE_FIRE_INTERVAL * (0.5 + Math.random());
     vy = EAGLE_FALL_SPEED; // 最初はまっすぐ下りる
@@ -565,6 +608,11 @@ function spawnBoss(kind: BossKind): void {
     spinAngle: 0,
     moveTime: 0,
     enraged: false,
+    chargeState: "none",
+    chargeTimer: cfg.chargeInterval || 999, // 0（突進なし）のボスは事実上発動しない
+    chargeStateTimer: 0,
+    chargeVX: 0,
+    chargeVY: 0,
   };
   bossSpawned = true;
   setMusic(stage.bossMusic); // ボス登場でそのステージのボスBGMに切り替え
@@ -644,6 +692,9 @@ type BossConfig = {
   fireInterval: number; // 攻撃と攻撃の間隔（秒）
   fireIntervalEnraged: number; // 怒り時の攻撃間隔（短い＝激しい）
   patterns: ((b: Boss) => void)[]; // 順番に使う攻撃技
+  chargeInterval: number; // 突進の間隔（秒）。0なら突進しない
+  chargeIntervalEnraged: number; // 怒り時の突進間隔
+  chargeSpeed: number; // 突進の速さ（px/秒）
 };
 
 const BOSS_CONFIG: Record<BossKind, BossConfig> = {
@@ -657,6 +708,9 @@ const BOSS_CONFIG: Record<BossKind, BossConfig> = {
     fireInterval: 1.4,
     fireIntervalEnraged: 0.75,
     patterns: [bossPatternAimed, bossPatternFan],
+    chargeInterval: 0, // 突進しない
+    chargeIntervalEnraged: 0,
+    chargeSpeed: 0,
   },
   // ステージ2：機械ゴリラ（硬い・左右＋前後に動く・多彩な5種の技）
   machineGorilla: {
@@ -674,8 +728,85 @@ const BOSS_CONFIG: Record<BossKind, BossConfig> = {
       bossPatternTwinStream,
       bossPatternSpiral,
     ],
+    chargeInterval: 0, // 突進しない
+    chargeIntervalEnraged: 0,
+    chargeSpeed: 0,
+  },
+  // ステージ3：酸素ボンベのゴリラ（機械ゴリラの動き＋たまに自機へ突進）
+  scubaGorilla: {
+    maxHp: 150,
+    swaySpeed: 90,
+    swaySpeedEnraged: 145,
+    bobAmplitude: 50, // 前後にも動く（機械ゴリラと同じ）
+    bobSpeed: 1.3,
+    fireInterval: 1.1,
+    fireIntervalEnraged: 0.6,
+    patterns: [
+      bossPatternAimedWide,
+      bossPatternFan,
+      bossPatternRing,
+      bossPatternTwinStream,
+      bossPatternSpiral,
+    ],
+    chargeInterval: 5.0, // 約5秒ごとに突進
+    chargeIntervalEnraged: 3.0, // 怒り時はもっと頻繁に
+    chargeSpeed: 430, // 突進の速さ
   },
 };
+
+// 突進（酸素ボンベのゴリラ専用）の状態を進める。
+//   none（通常）→ windup（少し引いてためる）→ dash（自機めがけて突っ込む）
+//   → back（元の高さへ戻る）→ none … をくり返す。
+//   突進中は true を返し、その間は通常の左右移動・攻撃を止める。
+function updateBossCharge(b: Boss, cfg: BossConfig, dt: number): boolean {
+  if (b.chargeState === "none") {
+    b.chargeTimer -= dt;
+    if (b.chargeTimer <= 0) {
+      b.chargeState = "windup";
+      b.chargeStateTimer = 0.5; // ためる時間
+    }
+    return false; // まだ通常行動
+  }
+
+  if (b.chargeState === "windup") {
+    // 少し上に引いて「ためる」。狙いは最新の自機位置に合わせ続ける
+    b.y -= 35 * dt;
+    b.chargeStateTimer -= dt;
+    if (b.chargeStateTimer <= 0) {
+      const ang = Math.atan2(player.y - b.y, player.x - b.x);
+      const sp = cfg.chargeSpeed * (b.enraged ? 1.25 : 1);
+      b.chargeVX = Math.cos(ang) * sp;
+      b.chargeVY = Math.sin(ang) * sp;
+      b.chargeState = "dash";
+    }
+  } else if (b.chargeState === "dash") {
+    // 自機めがけて突っ込む。横は画面端ではね返す
+    b.x += b.chargeVX * dt;
+    b.y += b.chargeVY * dt;
+    if (b.x < BOSS_RADIUS) {
+      b.x = BOSS_RADIUS;
+      b.chargeVX = Math.abs(b.chargeVX);
+    } else if (b.x > WIDTH - BOSS_RADIUS) {
+      b.x = WIDTH - BOSS_RADIUS;
+      b.chargeVX = -Math.abs(b.chargeVX);
+    }
+    // 画面下のほうまで突っ込んだら戻りへ
+    if (b.y >= HEIGHT - BOSS_RADIUS - 30) {
+      b.y = HEIGHT - BOSS_RADIUS - 30;
+      b.chargeState = "back";
+    }
+  } else {
+    // back：元の高さへ戻る
+    b.y -= BOSS_ENTER_SPEED * 1.8 * dt;
+    if (b.y <= BOSS_Y_TARGET) {
+      b.y = BOSS_Y_TARGET;
+      b.chargeState = "none";
+      b.chargeTimer = b.enraged ? cfg.chargeIntervalEnraged : cfg.chargeInterval;
+      b.moveTime = 0; // 前後移動の位相をリセット
+    }
+  }
+  return true; // 突進中
+}
 
 // 自機がダメージを受けたときの共通処理（敵との接触・敵弾の両方から呼ぶ）
 function damagePlayer(): void {
@@ -732,7 +863,12 @@ function useBomb(): void {
 //   まだ後のステージがあれば次へ進み、最後のステージならゲームクリア。
 function defeatBoss(): void {
   if (!boss) return;
-  const color = boss.kind === "machineGorilla" ? "#7fe9ff" : "#b15cff";
+  const color =
+    boss.kind === "machineGorilla"
+      ? "#7fe9ff"
+      : boss.kind === "scubaGorilla"
+        ? "#7fffe0"
+        : "#b15cff";
   spawnExplosion(boss.x, boss.y, color, 70); // 大きな爆発
   playBossExplosion();
   boss = null;
@@ -845,6 +981,7 @@ function update(dt: number): void {
   updateLayer(clouds, dt, 40);
   updateLayer(nearGround, dt, 70);
   updateIslands(dt); // 地球の空テーマの島（同じ速さ・等間隔で重ならない）
+  updateBubbles(dt); // 海の中テーマの泡（下から上へ立ちのぼる）
 
   // ボムの閃光・画面の揺れを時間で弱めていく（どの状態でも進める）
   if (bombFlash > 0) bombFlash -= dt;
@@ -965,17 +1102,20 @@ function update(dt: number): void {
     if (e.kind === "snail") {
       // カタツムリ：ほとんど動かず、ゆっくり下りるだけ
       e.y += SNAIL_SPEED * dt;
-    } else if (e.kind === "snake") {
-      // 蛇：基準位置を中心に、サイン波で左右にくねりながら下りる
+    } else if (e.kind === "snake" || e.kind === "jellyfish") {
+      // 蛇・クラゲ：基準位置を中心に、サイン波で左右にくねりながら下りる
       e.y += ENEMY_SPEED * dt;
       e.x = e.baseX + Math.sin(e.age * SNAKE_FREQ) * SNAKE_AMPLITUDE;
-      // 蛇だけ、画面内にいる間はたまに自機へ弾を撃つ
+      // 画面内にいる間はたまに自機へ弾を撃つ
       e.fireTimer -= dt;
       if (e.fireTimer <= 0 && e.y > 0 && e.y < HEIGHT - 80) {
         const angle = Math.atan2(player.y - e.y, player.x - e.x);
         fireEnemyBullet(e.x, e.y, angle);
         e.fireTimer = SNAKE_FIRE_INTERVAL;
       }
+    } else if (e.kind === "tuna") {
+      // マグロ：まっすぐ下へ、ただし速い（黄金の豚の2倍速）
+      e.y += TUNA_SPEED * dt;
     } else if (e.kind === "spider") {
       // 蜘蛛：糸で上下に伸び縮みしながら（縦に動いて）下りる。
       // 速さをサイン波で増減させ、時には少し上に戻る＝縦のビヨンビヨン感を出す
@@ -985,7 +1125,7 @@ function update(dt: number): void {
       e.x += e.vx * dt;
       e.y = GOLDPIG_Y + Math.sin(e.age * 2.5) * 24;
     } else {
-      // 鷲：一定時間ごとに進む向きをランダムに変えて、ふらふら動き回る。
+      // 鷲・イカ：一定時間ごとに進む向きをランダムに変えて、ふらふら動き回る。
       // 横は気まぐれ、縦は必ず少しずつ下りる（いつか画面外へ出る）。
       e.wanderTimer -= dt;
       if (e.wanderTimer <= 0) {
@@ -1109,6 +1249,19 @@ function update(dt: number): void {
         boss.phase = "fight";
       }
     } else {
+      // 突進する（酸素ボンベのゴリラ）。突進中は通常の移動・攻撃を止める
+      const charging =
+        cfg.chargeInterval > 0 && updateBossCharge(boss, cfg, dt);
+
+      if (charging) {
+        // 突進中に自機へぶつかったらダメージ（無敵中は当たらない）
+        if (
+          player.invincible <= 0 &&
+          hit(player.x, player.y, PLAYER_RADIUS, boss.x, boss.y, BOSS_RADIUS)
+        ) {
+          damagePlayer();
+        }
+      } else {
       // 怒りモードなら、左右移動も攻撃も激しくなる
       const swaySpeed = boss.enraged ? cfg.swaySpeedEnraged : cfg.swaySpeed;
       const fireInterval = boss.enraged ? cfg.fireIntervalEnraged : cfg.fireInterval;
@@ -1139,6 +1292,7 @@ function update(dt: number): void {
         if (boss.enraged) bossPatternAimed(boss);
         boss.fireTimer = fireInterval;
       }
+      } // 通常行動（突進していないとき）の終わり
     }
 
     // 自分の弾 × ボス
@@ -1675,12 +1829,181 @@ function drawGoldPig(cx: number, cy: number, age: number): void {
   ctx.restore();
 }
 
+// -------------------------------------------------------------------
+// 敵その6：クラゲ（ステージ3）。(cx, cy) が中心。age でかさが脈打ち、触手が揺れる。
+// -------------------------------------------------------------------
+function drawJellyfish(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const squash = Math.sin(age * 3) * 0.12; // かさがふわふわ伸び縮み
+
+  // ほんのり光るオーラ（半透明のクラゲらしさ）
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = "#ff9ed8";
+  ctx.beginPath();
+  ctx.arc(0, 0, 20, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // 触手（下に揺れる細いひも）
+  ctx.strokeStyle = "rgba(255, 158, 216, 0.85)";
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  for (let i = -2; i <= 2; i++) {
+    const tx = i * 4;
+    const wave = Math.sin(age * 4 + i) * 3;
+    ctx.beginPath();
+    ctx.moveTo(tx, 2);
+    ctx.quadraticCurveTo(tx + wave, 10, tx + wave * 0.6, 18);
+    ctx.stroke();
+  }
+
+  // かさ（半円のドーム）
+  ctx.fillStyle = "#f7b6e0";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 13 * (1 + squash), 11 * (1 - squash), 0, Math.PI, Math.PI * 2);
+  ctx.fill();
+  // かさのフチ
+  ctx.fillStyle = "#e87cc0";
+  ctx.fillRect(-13 * (1 + squash), -1, 26 * (1 + squash), 3);
+  // かさの中の模様（うすい点々）
+  ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+  ctx.beginPath();
+  ctx.arc(-4, -4, 1.6, 0, Math.PI * 2);
+  ctx.arc(4, -4, 1.6, 0, Math.PI * 2);
+  ctx.arc(0, -6, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+  // 目（つぶらな黒目）
+  ctx.fillStyle = "#3a1530";
+  ctx.beginPath();
+  ctx.arc(-3, -2, 1.4, 0, Math.PI * 2);
+  ctx.arc(3, -2, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// 敵その7：マグロ（ステージ3）。(cx, cy) が中心。まっすぐ下りる。age で尾びれを振る。
+// -------------------------------------------------------------------
+function drawTuna(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const tail = Math.sin(age * 18) * 4; // 高速で泳ぐので尾びれを速く振る
+  const BODY = "#5b7f9e"; // 背の青銀
+  const BELLY = "#cdd9e2"; // 腹の白銀
+
+  // 体は進行方向（下）を向く縦長の紡錘形
+  // 尾びれ（上＝後ろ）
+  ctx.fillStyle = "#3f5f78";
+  ctx.beginPath();
+  ctx.moveTo(0, -12);
+  ctx.lineTo(-7, -20 + tail);
+  ctx.lineTo(7, -20 - tail);
+  ctx.closePath();
+  ctx.fill();
+
+  // 胴体
+  ctx.fillStyle = BODY;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 8, 15, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 腹（明るい下側）
+  ctx.fillStyle = BELLY;
+  ctx.beginPath();
+  ctx.ellipse(0, 4, 5, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 胸びれ（左右）
+  ctx.fillStyle = "#3f5f78";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 6, 0);
+    ctx.lineTo(side * 13, 4);
+    ctx.lineTo(side * 6, 6);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 目（先頭＝下のほう）
+  ctx.fillStyle = "#10202c";
+  ctx.beginPath();
+  ctx.arc(-3, 9, 1.5, 0, Math.PI * 2);
+  ctx.arc(3, 9, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// 敵その8：イカ（ステージ3）。(cx, cy) が中心。age で足がうねうね動く。
+// -------------------------------------------------------------------
+function drawSquid(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const BODY = "#c77dd6"; // むらさき
+  const BODY_DARK = "#9a52ab";
+
+  // 足（下に伸びる10本のうち代表5本。うねうね動く）
+  ctx.strokeStyle = BODY_DARK;
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  for (let i = -2; i <= 2; i++) {
+    const lx = i * 3.5;
+    const wave = Math.sin(age * 7 + i * 0.8) * 4;
+    ctx.beginPath();
+    ctx.moveTo(lx, 4);
+    ctx.quadraticCurveTo(lx + wave, 12, lx + wave * 0.5, 19);
+    ctx.stroke();
+  }
+
+  // 頭（とがった三角の胴＝下向き）
+  ctx.fillStyle = BODY;
+  ctx.beginPath();
+  ctx.moveTo(0, -16);
+  ctx.lineTo(-9, 6);
+  ctx.lineTo(9, 6);
+  ctx.closePath();
+  ctx.fill();
+  // エンペラ（左右のひれ）
+  ctx.fillStyle = BODY_DARK;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 7, -10);
+    ctx.lineTo(side * 13, -4);
+    ctx.lineTo(side * 6, 0);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 大きな目（イカらしいクリッとした目）
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(-4, 0, 3, 0, Math.PI * 2);
+  ctx.arc(4, 0, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#1a0a20";
+  ctx.beginPath();
+  ctx.arc(-4, 1, 1.5, 0, Math.PI * 2);
+  ctx.arc(4, 1, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 // 敵を種類に応じた姿で描く
 function drawEnemy(e: Enemy): void {
   if (e.kind === "snail") drawSnail(e.x, e.y, e.age);
   else if (e.kind === "snake") drawSnake(e.x, e.y, e.age);
   else if (e.kind === "spider") drawSpider(e.x, e.y, e.age);
   else if (e.kind === "eagle") drawEagle(e.x, e.y, e.age);
+  else if (e.kind === "jellyfish") drawJellyfish(e.x, e.y, e.age);
+  else if (e.kind === "tuna") drawTuna(e.x, e.y, e.age);
+  else if (e.kind === "squid") drawSquid(e.x, e.y, e.age);
   else drawGoldPig(e.x, e.y, e.age);
 }
 
@@ -1972,6 +2295,167 @@ function drawMachineGorillaBoss(cx: number, cy: number, walk: number, enraged = 
   ctx.restore();
 }
 
+// -------------------------------------------------------------------
+// ボス：酸素ボンベのゴリラ（ステージ3）。(cx, cy) が中心。
+//   ゴリラ＋ダイビング装備（酸素ボンベ・水中マスク・足ひれ）。
+//   walk が大きいほど腕足が振れる。enraged=true で目とオーラが赤い。
+// -------------------------------------------------------------------
+function drawScubaGorilla(cx: number, cy: number, walk: number, enraged = false): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const swing = Math.sin(walk);
+  const bob = Math.sin(walk * 2) * 2;
+
+  // 怒りオーラ（赤く脈打つ）
+  if (enraged) {
+    const pulse = 0.5 + 0.5 * Math.sin(walk * 1.5);
+    ctx.save();
+    ctx.globalAlpha = 0.25 + pulse * 0.25;
+    ctx.fillStyle = "#ff3b3b";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 42 + pulse * 5, 48 + pulse * 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 立ちのぼる泡（水中らしさ）
+  ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+  for (let i = 0; i < 4; i++) {
+    const bx = 20 + i * 4;
+    const by = -34 - ((walk * 18 + i * 22) % 60);
+    ctx.beginPath();
+    ctx.arc(bx, by, 2 + (i % 2), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.translate(0, bob);
+
+  const FUR = "#3f5a52"; // 体毛（深い海の緑がかった灰）
+  const FUR_DARK = "#2c403a";
+  const SKIN = "#1c2622";
+
+  // --- 酸素ボンベ（背中。黄色いタンク2本＋レギュレーターのホース）---
+  ctx.fillStyle = "#e0a92a"; // タンクの黄色
+  for (const tx of [-9, 4]) {
+    ctx.beginPath();
+    ctx.roundRect(tx - 4 + 22, -18, 9, 30, 4);
+    ctx.fill();
+    ctx.fillStyle = "#9c7416";
+    ctx.fillRect(tx - 4 + 22, -20, 9, 4); // バルブ
+    ctx.fillStyle = "#e0a92a";
+  }
+  // ホース（タンクから口元へ）
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(24, -14);
+  ctx.quadraticCurveTo(16, -30, 4, -22);
+  ctx.stroke();
+
+  // --- 足（左右で逆に踏み出す）＋ 足ひれ ---
+  ctx.strokeStyle = FUR_DARK;
+  ctx.lineWidth = 14;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-11, 16);
+  ctx.lineTo(-13 + swing * 6, 34);
+  ctx.moveTo(11, 16);
+  ctx.lineTo(13 - swing * 6, 34);
+  ctx.stroke();
+  // 足ひれ（フィン）
+  ctx.fillStyle = "#1f6f86";
+  for (const side of [-1, 1]) {
+    const fx = side === -1 ? -15 + swing * 6 : 15 - swing * 6;
+    ctx.beginPath();
+    ctx.ellipse(fx, 39, 11, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- 腕（足と逆向きに振る）---
+  ctx.strokeStyle = FUR;
+  ctx.lineWidth = 15;
+  ctx.beginPath();
+  ctx.moveTo(-18, -12);
+  ctx.lineTo(-30 - swing * 6, 20);
+  ctx.moveTo(18, -12);
+  ctx.lineTo(30 + swing * 6, 20);
+  ctx.stroke();
+  // こぶし
+  ctx.fillStyle = FUR_DARK;
+  ctx.beginPath();
+  ctx.arc(-30 - swing * 6, 23, 9, 0, Math.PI * 2);
+  ctx.arc(30 + swing * 6, 23, 9, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 胴体 ---
+  ctx.fillStyle = FUR;
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 22, 25, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // ウェットスーツのおなか（濃い青）
+  ctx.fillStyle = "#234e63";
+  ctx.beginPath();
+  ctx.ellipse(0, 6, 13, 17, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 頭 ---
+  // 耳
+  ctx.fillStyle = FUR;
+  ctx.beginPath();
+  ctx.arc(-17, -25, 5, 0, Math.PI * 2);
+  ctx.arc(17, -25, 5, 0, Math.PI * 2);
+  ctx.fill();
+  // 頭本体
+  ctx.beginPath();
+  ctx.ellipse(0, -24, 18, 16, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 顔（肌）
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.ellipse(0, -20, 12, 13, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- 水中マスク（透明バイザー＋バンド）---
+  // バンド
+  ctx.strokeStyle = "#15131a";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-13, -26);
+  ctx.lineTo(13, -26);
+  ctx.stroke();
+  // ガラス（青く光る）
+  ctx.fillStyle = enraged ? "rgba(255,80,80,0.55)" : "rgba(120,210,255,0.55)";
+  ctx.beginPath();
+  ctx.ellipse(0, -24, 11, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#dfe9ee";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // 目（マスク越しに光る）
+  ctx.fillStyle = enraged ? "#ff3b3b" : "#f3d44a";
+  ctx.beginPath();
+  ctx.arc(-5, -24, 2.4, 0, Math.PI * 2);
+  ctx.arc(5, -24, 2.4, 0, Math.PI * 2);
+  ctx.fill();
+  // ガラスのハイライト
+  ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.beginPath();
+  ctx.ellipse(-5, -27, 3, 1.5, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- レギュレーター（口にくわえるマウスピース）---
+  ctx.fillStyle = "#15131a";
+  ctx.beginPath();
+  ctx.arc(0, -12, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#444";
+  ctx.fillRect(-2, -13, 4, 4);
+
+  ctx.restore();
+}
+
 // 遠い山（暗い青のなだらかな影）
 function drawHill(d: Deco): void {
   ctx.fillStyle = "#161f38";
@@ -2075,14 +2559,70 @@ function drawBackground(): void {
     for (const s of stars) ctx.fillRect(s.x, s.y, s.size, s.size);
     for (const d of clouds) drawCloud(d);
     for (const d of nearGround) drawGround(d);
-  } else {
+  } else if (theme === "sky") {
     // 地球の空：水色グラデーション → 海のきらめき → 緑の島 → 白い雲
     ctx.fillStyle = skyGradientDay;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     for (const d of farHills) drawSeaSparkle(d);
     for (const d of islands) drawIsland(d);
     for (const d of clouds) drawCloudWhite(d);
+  } else {
+    // 海の中：藍のグラデーション → 差し込む光 → 奥の岩 → 立ちのぼる泡
+    ctx.fillStyle = skyGradientSea;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    drawLightRays();
+    ctx.filter = "blur(2px)"; // 奥の岩はぼかして遠近感
+    for (const d of farHills) drawSeaRock(d);
+    ctx.filter = "none";
+    for (const d of bubbles) drawBubble(d);
   }
+}
+
+// 海の中：水面から差し込む光のすじ（ゆっくり明滅・移動）
+function drawLightRays(): void {
+  const t = performance.now() / 1000;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 4; i++) {
+    const baseX = (i + 0.5) * (WIDTH / 4);
+    const sway = Math.sin(t * 0.3 + i) * 30;
+    const alpha = 0.05 + 0.04 * (0.5 + 0.5 * Math.sin(t * 0.5 + i * 1.3));
+    ctx.fillStyle = `rgba(180, 240, 255, ${alpha})`;
+    ctx.beginPath();
+    ctx.moveTo(baseX - 26 + sway, 0);
+    ctx.lineTo(baseX + 26 + sway, 0);
+    ctx.lineTo(baseX + 70 + sway, HEIGHT);
+    ctx.lineTo(baseX - 70 + sway, HEIGHT);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// 海の中：奥に沈む岩のシルエット（青グレーで控えめに）
+function drawSeaRock(d: Deco): void {
+  const s = d.scale;
+  ctx.fillStyle = "rgba(8, 40, 64, 0.55)";
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y, 50 * s, 26 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// 海の中：立ちのぼる泡（1粒）
+function drawBubble(d: Deco): void {
+  const s = d.scale;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, 4 * s, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // ハイライト
+  ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+  ctx.beginPath();
+  ctx.arc(d.x - 1.4 * s, d.y - 1.4 * s, 1 * s, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // スマホ用の操作ボタン（移動パッド・ショット・ボム）を画面下に描く
@@ -2231,6 +2771,8 @@ function render(): void {
   if (boss) {
     if (boss.kind === "machineGorilla") {
       drawMachineGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
+    } else if (boss.kind === "scubaGorilla") {
+      drawScubaGorilla(boss.x, boss.y, boss.walk, boss.enraged);
     } else {
       drawGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
     }
@@ -2239,7 +2781,12 @@ function render(): void {
     const ratio = Math.max(0, boss.hp / boss.maxHp);
     ctx.fillStyle = "#3a1a3a";
     ctx.fillRect(20, 12, barW, 10);
-    ctx.fillStyle = boss.kind === "machineGorilla" ? "#5cd6ff" : "#ff5cc8";
+    ctx.fillStyle =
+      boss.kind === "machineGorilla"
+        ? "#5cd6ff"
+        : boss.kind === "scubaGorilla"
+          ? "#5cffd0"
+          : "#ff5cc8";
     ctx.fillRect(20, 12, barW * ratio, 10);
   }
 

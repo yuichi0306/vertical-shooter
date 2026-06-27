@@ -11,23 +11,36 @@
 // ===================================================================
 
 // 敵の種類
-//   "snail"  … カタツムリ。ほとんど動かず、ゆっくり這うように下りてくる
-//   "snake"  … 蛇。左右にくねくね横移動しながら下りてくる
-//   "spider" … 蜘蛛。糸で上下にビヨンと伸び縮みしながら（縦に動いて）下りてくる
-//   "eagle"  … 鷲。ランダムにふらふら動き回りながら、自機へ弾を撃ってくる
-//   "goldpig"… 黄金の豚（レア）。1ステージに1匹だけ。画面を横切るように飛ぶ。
-//              少し硬く、倒すとボムを落とし、得点は通常の2倍
-export type EnemyKind = "snail" | "snake" | "spider" | "eagle" | "goldpig";
+//   "snail"     … カタツムリ。ほとんど動かず、ゆっくり這うように下りてくる
+//   "snake"     … 蛇。左右にくねくね横移動しながら下りてくる
+//   "spider"    … 蜘蛛。糸で上下にビヨンと伸び縮みしながら（縦に動いて）下りてくる
+//   "eagle"     … 鷲。ランダムにふらふら動き回りながら、自機へ弾を撃ってくる
+//   "goldpig"   … 黄金の豚（レア）。1ステージに1匹だけ。画面を横切るように飛ぶ。
+//                 少し硬く、倒すとボムを落とし、得点は通常の2倍
+//   "jellyfish" … クラゲ（ステージ3）。蛇と同じ動き（くねりながら弾を撃つ）
+//   "tuna"      … マグロ（ステージ3）。まっすぐしか進まないが速い（黄金の豚の2倍速）
+//   "squid"     … イカ（ステージ3）。鷲と同じ動き（ふらふら動いて弾を撃つ）
+export type EnemyKind =
+  | "snail"
+  | "snake"
+  | "spider"
+  | "eagle"
+  | "goldpig"
+  | "jellyfish"
+  | "tuna"
+  | "squid";
 
 // ボスの種類
 //   "gorilla"        … ゴリラ（ステージ1）。腕足が動く
 //   "machineGorilla" … 機械のゴリラ（ステージ2）。攻撃が多彩で硬い
-export type BossKind = "gorilla" | "machineGorilla";
+//   "scubaGorilla"   … 酸素ボンベのゴリラ（ステージ3）。機械ゴリラの動き＋たまに突進
+export type BossKind = "gorilla" | "machineGorilla" | "scubaGorilla";
 
 // 背景のテーマ
 //   "night" … 夜空（星・遠い山・暗い島）
 //   "sky"   … 地球の空（水色・白い雲・海・緑の島）
-export type StageTheme = "night" | "sky";
+//   "sea"   … 海の中（青い水・泡・差し込む光・海藻）
+export type StageTheme = "night" | "sky" | "sea";
 
 // BGMの種類（実体は audio.ts。ここでは型だけ借りる）
 import type { MusicTrack } from "./audio";
@@ -148,5 +161,53 @@ const STAGE2: Stage = {
   ],
 };
 
+// -------------------------------------------------------------------
+// ステージ3：海の中。クラゲ・マグロ・イカ ＋ 酸素ボンベのゴリラのボス
+// -------------------------------------------------------------------
+const STAGE3: Stage = {
+  name: "STAGE 3",
+  theme: "sea",
+  boss: "scubaGorilla",
+  duration: 19.0,
+  normalMusic: "normal2",
+  bossMusic: "boss2",
+  timeline: [
+    // 序盤：クラゲ（くねりながら撃つ）で肩慣らし
+    { time: 1.0, kind: "jellyfish", x: 0.3 },
+    { time: 1.0, kind: "jellyfish", x: 0.7 },
+    { time: 2.5, kind: "jellyfish", x: 0.5 },
+
+    // 速いマグロが突っ込んでくる（まっすぐ・高速）
+    { time: 3.5, kind: "tuna", x: 0.5 },
+    { time: 4.5, kind: "tuna", x: 0.25 },
+    { time: 4.8, kind: "tuna", x: 0.75 },
+
+    // イカ登場（ふらふら動いて撃つ）
+    { time: 6.0, kind: "squid", x: 0.5 },
+    { time: 7.0, kind: "jellyfish", x: 0.2 },
+    { time: 7.0, kind: "jellyfish", x: 0.8 },
+
+    // レアな黄金の豚（このステージに1匹だけ。右から飛んでくる）
+    { time: 8.5, kind: "goldpig", x: 1.0 },
+    { time: 9.0, kind: "tuna", x: 0.4 },
+    { time: 9.3, kind: "tuna", x: 0.6 },
+    { time: 10.5, kind: "squid", x: 0.3 },
+    { time: 10.5, kind: "squid", x: 0.7 },
+
+    // 中盤〜終盤：3種を混ぜて山場へ
+    { time: 12.0, kind: "jellyfish", x: 0.5 },
+    { time: 12.5, kind: "tuna", x: 0.2 },
+    { time: 12.8, kind: "tuna", x: 0.8 },
+    { time: 13.5, kind: "squid", x: 0.5 },
+    { time: 14.5, kind: "jellyfish", x: 0.3 },
+    { time: 14.5, kind: "jellyfish", x: 0.7 },
+    { time: 15.5, kind: "tuna", x: 0.5 },
+    { time: 16.0, kind: "squid", x: 0.25 },
+    { time: 16.0, kind: "squid", x: 0.75 },
+    { time: 17.0, kind: "tuna", x: 0.35 },
+    { time: 17.0, kind: "tuna", x: 0.65 },
+  ],
+};
+
 // プレイする順番にステージを並べる（先頭から順に連戦）
-export const STAGES: Stage[] = [STAGE1, STAGE2];
+export const STAGES: Stage[] = [STAGE1, STAGE2, STAGE3];
