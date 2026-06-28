@@ -500,6 +500,22 @@ function spawnExplosion(x: number, y: number, color: string, count: number): voi
 }
 
 // -------------------------------------------------------------------
+// アイテム取得などの手応え演出（浮かぶ文字＋広がる光の輪）
+// -------------------------------------------------------------------
+// ふわっと上に浮かんで消える文字（「+100」など）
+type FloatText = { x: number; y: number; text: string; color: string; life: number; maxLife: number };
+const floatTexts: FloatText[] = [];
+function spawnFloatText(x: number, y: number, text: string, color: string): void {
+  floatTexts.push({ x, y, text, color, life: 0.9, maxLife: 0.9 });
+}
+// パッと広がって消える光の輪
+type Ring = { x: number; y: number; color: string; life: number; maxLife: number; maxR: number };
+const rings: Ring[] = [];
+function spawnRing(x: number, y: number, color: string, maxR = 26): void {
+  rings.push({ x, y, color, life: 0.45, maxLife: 0.45, maxR });
+}
+
+// -------------------------------------------------------------------
 // 敵の弾（ボスが撃ってくる弾。自機に当たる）
 // -------------------------------------------------------------------
 const EBULLET_RADIUS = 6;
@@ -872,6 +888,16 @@ const BOSS_BULLET_COLOR: Record<BossKind, string> = {
   motherGorilla: "#ffcf3b",
 };
 
+// ボスの表示名（HPバーの下に出す）
+const BOSS_NAME: Record<BossKind, string> = {
+  gorilla: "ゴリラ",
+  machineGorilla: "機械ゴリラ",
+  scubaGorilla: "酸素ボンベゴリラ",
+  snowGorilla: "スノーゴリラ",
+  spaceChimp: "宇宙チンパンジー",
+  motherGorilla: "メカ母艦ゴリラ",
+};
+
 // ボスごとの設定（体力・動き・攻撃の激しさ・使う技の一覧）
 type BossConfig = {
   maxHp: number; // 体力
@@ -1217,6 +1243,8 @@ function resetGame(): void {
   items.length = 0;
   enemyBullets.length = 0;
   particles.length = 0;
+  floatTexts.length = 0;
+  rings.length = 0;
   boss = null;
   bossSpawned = false;
   midBossSpawned = false;
@@ -1295,6 +1323,20 @@ function update(dt: number): void {
     p.vy *= 0.96;
     p.life -= dt;
     if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // --- 浮かぶ文字（「+100」など）：ゆっくり上へ昇って消える ---
+  for (let i = floatTexts.length - 1; i >= 0; i--) {
+    const f = floatTexts[i];
+    f.y -= 28 * dt; // 上に昇る
+    f.life -= dt;
+    if (f.life <= 0) floatTexts.splice(i, 1);
+  }
+
+  // --- 光の輪：時間で寿命を減らす（広がり具合は寿命から計算）---
+  for (let i = rings.length - 1; i >= 0; i--) {
+    rings[i].life -= dt;
+    if (rings[i].life <= 0) rings.splice(i, 1);
   }
 
   // この1フレームのタップ（タッチ操作）を1回だけ取り出す
@@ -1556,12 +1598,24 @@ function update(dt: number): void {
       items.splice(i, 1);
       if (it.kind === "bomb") {
         player.bombs = Math.min(MAX_BOMBS, player.bombs + 1); // ボムを1つ補充
+        // 手応え演出：黄色い光の輪＋「BOMB +1」（ボムは加点なし）
+        spawnRing(it.x, it.y, "#ffd23b");
+        spawnExplosion(it.x, it.y, "#ffe88a", 8);
+        spawnFloatText(it.x, it.y, "BOMB +1", "#ffd23b");
       } else if (it.kind === "speed") {
         player.speedLevel = Math.min(SPEED_MAX, player.speedLevel + 1); // スピード1段階アップ
         score += SCORE_ITEM; // 強化アイテム取得で+100点
+        // 手応え演出：光の輪＋キラキラ＋「+100」
+        spawnRing(it.x, it.y, "#ffd23b");
+        spawnExplosion(it.x, it.y, "#ffe88a", 8);
+        spawnFloatText(it.x, it.y, "+100", "#fff36b");
       } else {
         player.power = Math.min(POWER_MAX, player.power + 1); // 1段階アップ
         score += SCORE_ITEM; // 強化アイテム取得で+100点
+        // 手応え演出：水色の光の輪＋キラキラ＋「+100」
+        spawnRing(it.x, it.y, "#7be0ff");
+        spawnExplosion(it.x, it.y, "#bdf3ff", 8);
+        spawnFloatText(it.x, it.y, "+100", "#fff36b");
       }
     } else if (it.y > HEIGHT + ITEM_RADIUS) {
       items.splice(i, 1); // 拾えず画面下へ
@@ -1574,8 +1628,11 @@ function update(dt: number): void {
     if (e.kind !== "angel") continue;
     if (hit(player.x, player.y, PLAYER_RADIUS, e.x, e.y, ENEMY_RADIUS)) {
       enemies.splice(ei, 1);
-      if (player.lives < MAX_LIVES) player.lives += 1; // ハートが1増える（上限あり）
+      const gained = player.lives < MAX_LIVES;
+      if (gained) player.lives += 1; // ハートが1増える（上限あり）
       spawnExplosion(e.x, e.y, "#fff3b0", 18); // 淡い金のキラキラ
+      spawnRing(e.x, e.y, "#ffe6a0", 32);
+      spawnFloatText(e.x, e.y, gained ? "1UP!" : "MAX", "#ff8aa8");
       playHeal();
     }
   }
@@ -4538,12 +4595,8 @@ function render(): void {
     } else {
       drawGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
     }
-    // 画面上部のHPバー
-    const barW = WIDTH - 40;
-    const ratio = Math.max(0, boss.hp / boss.maxHp);
-    ctx.fillStyle = "#3a1a3a";
-    ctx.fillRect(20, 12, barW, 10);
-    ctx.fillStyle =
+    // 画面上部のHPバー（角丸＋ツヤ＋目盛り＋ボス名）
+    const hpColor =
       boss.kind === "machineGorilla"
         ? "#5cd6ff"
         : boss.kind === "scubaGorilla"
@@ -4555,16 +4608,71 @@ function render(): void {
               : boss.kind === "motherGorilla"
                 ? "#9fb4ff"
                 : "#ff5cc8";
-    ctx.fillRect(20, 12, barW * ratio, 10);
-    // 中ボスは「MID BOSS」、ラスボスは「FINAL BOSS」のラベルをHPバーの上に出す
-    if (boss.isMid || boss.kind === "motherGorilla") {
-      ctx.save();
-      ctx.fillStyle = boss.isMid ? "#7df9ff" : "#ffd45c";
-      ctx.font = "bold 11px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(boss.isMid ? "MID BOSS" : "FINAL BOSS", WIDTH / 2, 34);
-      ctx.restore();
+    const ratio = Math.max(0, boss.hp / boss.maxHp);
+    const barX = 20;
+    const barY = 14;
+    const barW = WIDTH - 40;
+    const barH = 11;
+
+    ctx.save();
+    // 土台（半透明の黒・角丸・うっすらフチ）
+    ctx.fillStyle = "rgba(10, 6, 16, 0.8)";
+    ctx.beginPath();
+    ctx.roundRect(barX - 2, barY - 2, barW + 4, barH + 4, 6);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 残りHP（ボス色のグラデ＝上が明るくツヤ）
+    const fillW = barW * ratio;
+    if (fillW > 0) {
+      const g = ctx.createLinearGradient(0, barY, 0, barY + barH);
+      g.addColorStop(0, "#ffffff");
+      g.addColorStop(0.18, hpColor);
+      g.addColorStop(1, hexToRgba(hpColor, 0.65));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, fillW, barH, 4);
+      ctx.fill();
+      // 上半分に白いツヤ
+      ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, fillW, barH * 0.45, 4);
+      ctx.fill();
     }
+
+    // 目盛り（10等分の区切り線）
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 10; i++) {
+      const sx = barX + (barW * i) / 10;
+      ctx.beginPath();
+      ctx.moveTo(sx, barY);
+      ctx.lineTo(sx, barY + barH);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // ボス名（バーの下に中央表示）。中ボス・ラスボスは肩書きつき
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.font = "bold 12px monospace";
+    let bossLabel = BOSS_NAME[boss.kind];
+    let labelColor = hpColor;
+    if (boss.isMid) {
+      bossLabel = "中ボス  " + bossLabel;
+      labelColor = "#7df9ff";
+    } else if (boss.kind === "motherGorilla") {
+      bossLabel = "★ラスボス★  " + bossLabel;
+      labelColor = "#ffd45c";
+    }
+    ctx.fillStyle = labelColor;
+    ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
+    ctx.shadowBlur = 3;
+    ctx.fillText(bossLabel, WIDTH / 2, barY + barH + 16);
+    ctx.restore();
+    ctx.textAlign = "left";
   }
 
   // 敵の弾（光る危険な弾：色つきオーラ＋白い芯＋ゆっくり脈打つ）
@@ -4620,6 +4728,37 @@ function render(): void {
   }
   ctx.restore();
   ctx.globalAlpha = 1; // 透明度を元に戻す
+
+  // アイテム取得などの「光の輪」（パッと広がって薄くなる）
+  ctx.save();
+  for (const ring of rings) {
+    const t = Math.max(0, ring.life / ring.maxLife); // 1 → 0
+    const r = ring.maxR * (1 - t) + 4; // 小さい→大きいへ
+    ctx.globalAlpha = t;
+    ctx.strokeStyle = ring.color;
+    ctx.lineWidth = 3 * t + 0.5;
+    ctx.beginPath();
+    ctx.arc(ring.x, ring.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+
+  // 浮かぶ文字（「+100」など）：上に昇りながら薄くなる
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.font = "bold 14px monospace";
+  for (const f of floatTexts) {
+    const t = Math.max(0, f.life / f.maxLife); // 1 → 0
+    ctx.globalAlpha = Math.min(1, t * 1.6); // 最後だけスッと消える
+    ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
+    ctx.shadowBlur = 3;
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, f.x, f.y);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  ctx.textAlign = "left";
 
   // 自機のショット（光るエネルギー弾：黄色いオーラ＋白い芯）
   ctx.save();
@@ -4770,21 +4909,110 @@ function render(): void {
   }
 
   // ステージ開始時のバナー（「STAGE 2」など）。ボスがいない間だけ表示。
+  // スッと横から滑り込み→少し止まって→スッと抜けていく＋飾りライン。
   if (stageBanner > 0 && !boss) {
+    const shown = STAGE_BANNER_TIME - stageBanner; // 表示開始からの経過秒
+    let slide = 0;
+    let alpha = 1;
+    if (shown < 0.35) {
+      const k = shown / 0.35; // 0→1（左から滑り込む）
+      slide = (1 - k) * -120;
+      alpha = k;
+    } else if (stageBanner < 0.45) {
+      const k = stageBanner / 0.45; // 1→0（右へ抜けていく）
+      slide = (1 - k) * 120;
+      alpha = k;
+    }
+    // テーマに合わせたアクセント色
+    const accent =
+      theme === "night" ? "#5cff9d"
+      : theme === "sky" ? "#9fe0ff"
+      : theme === "sea" ? "#5cffd0"
+      : theme === "ice" ? "#bfe8ff"
+      : "#c9a8ff"; // space
+    const cx = WIDTH / 2 + slide;
+    const cy = HEIGHT / 2;
+    ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.textAlign = "center";
-    ctx.fillStyle = theme === "night" ? "#5cff9d" : "#ffffff";
+    // 上下の飾りライン
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 95, cy - 27);
+    ctx.lineTo(cx + 95, cy - 27);
+    ctx.moveTo(cx - 95, cy + 13);
+    ctx.lineTo(cx + 95, cy + 13);
+    ctx.stroke();
+    // ステージ名（白文字＋アクセント色のグロー）
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = "#ffffff";
     ctx.font = "bold 34px monospace";
-    ctx.fillText(stage.name, WIDTH / 2, HEIGHT / 2);
+    ctx.fillText(stage.name, cx, cy);
+    ctx.shadowBlur = 0;
+    // 小さな「START!」
+    ctx.fillStyle = accent;
+    ctx.font = "bold 11px monospace";
+    ctx.fillText("START!", cx, cy + 30);
+    ctx.restore();
     ctx.textAlign = "left";
   }
 
-  // 「WARNING」表示：ボス入場中の演出
+  // 「WARNING」表示：ボス入場中の演出（赤く点滅する警告バー＋流れるハザード縞）
   if (boss && boss.phase === "enter") {
+    ctx.save();
+    const wt = performance.now() / 1000;
+    const blink = 0.5 + 0.5 * Math.sin(wt * 10); // 速めに点滅
+    const bandY = HEIGHT / 2 - 36;
+    const bandH = 72;
+
+    // 黒い帯（土台）
+    ctx.fillStyle = "rgba(0, 0, 0, 0.74)";
+    ctx.fillRect(0, bandY, WIDTH, bandH);
+
+    // 上下のフチに「黄×黒の斜めハザード縞」が流れる（8pxの細い帯だけに表示）
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, bandY, WIDTH, 8);
+    ctx.rect(0, bandY + bandH - 8, WIDTH, 8);
+    ctx.clip();
+    const off = (wt * 70) % 40;
+    ctx.fillStyle = "#ffcf3b";
+    for (let x = -bandH; x < WIDTH + 40; x += 40) {
+      ctx.beginPath();
+      ctx.moveTo(x + off, bandY);
+      ctx.lineTo(x + off + 18, bandY);
+      ctx.lineTo(x + off + 18 - bandH, bandY + bandH);
+      ctx.lineTo(x + off - bandH, bandY + bandH);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 赤い上下ライン（点滅）
+    ctx.globalAlpha = 0.35 + blink * 0.65;
+    ctx.fillStyle = "#ff2a2a";
+    ctx.fillRect(0, bandY + 8, WIDTH, 2);
+    ctx.fillRect(0, bandY + bandH - 10, WIDTH, 2);
+
+    // 「WARNING」文字（赤く光って点滅）
+    ctx.globalAlpha = 0.55 + blink * 0.45;
     ctx.textAlign = "center";
-    ctx.fillStyle = "#ff5cc8";
-    ctx.font = "bold 30px monospace";
-    ctx.fillText("WARNING", WIDTH / 2, HEIGHT / 2);
+    ctx.shadowColor = "#ff2a2a";
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = "#ff5050";
+    ctx.font = "bold 34px monospace";
+    ctx.fillText("⚠ WARNING ⚠", WIDTH / 2, HEIGHT / 2 + 4);
+    ctx.shadowBlur = 0;
+
+    // サブ文字（常時しっかり表示）
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#ffd0d0";
+    ctx.font = "bold 12px monospace";
+    ctx.fillText("BOSS APPROACHING", WIDTH / 2, HEIGHT / 2 + 26);
     ctx.textAlign = "left";
+    ctx.restore();
   }
 
   // 影をリセット（以降の描画に影が残らないように）
@@ -4800,26 +5028,63 @@ function render(): void {
   if (gameState === "clear") {
     drawEndingScreen();
   } else if (gameState === "gameover") {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+    // 暗い赤みのオーバーレイ（中央ほど赤黒く沈むビネット）
+    ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    const vig = ctx.createRadialGradient(
+      WIDTH / 2, HEIGHT / 2 - 40, 40,
+      WIDTH / 2, HEIGHT / 2 - 40, 320
+    );
+    vig.addColorStop(0, "rgba(70, 0, 0, 0.55)");
+    vig.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+    const cx = WIDTH / 2;
+    const cy = HEIGHT / 2;
+    ctx.save();
     ctx.textAlign = "center";
+    // GAME OVER（赤くにじむ大きな文字）
+    ctx.shadowColor = "rgba(255, 40, 40, 0.9)";
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = "#ff4040";
+    ctx.font = "bold 44px monospace";
+    ctx.fillText("GAME OVER", cx, cy - 56);
+    ctx.shadowBlur = 0;
+    // 赤い区切りライン
+    ctx.strokeStyle = "rgba(255, 80, 80, 0.6)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 120, cy - 36);
+    ctx.lineTo(cx + 120, cy - 36);
+    ctx.stroke();
+    // スコア
     ctx.fillStyle = "#ffffff";
-    ctx.font = "40px monospace";
-    ctx.fillText("GAME OVER", WIDTH / 2, HEIGHT / 2 - 50);
-    ctx.font = "18px monospace";
-    ctx.fillText(`SCORE  ${score}`, WIDTH / 2, HEIGHT / 2);
-    ctx.fillText(`HI-SCORE  ${highScore}`, WIDTH / 2, HEIGHT / 2 + 26);
+    ctx.font = "20px monospace";
+    ctx.fillText(`SCORE  ${score}`, cx, cy - 2);
+    ctx.fillStyle = "#cfd6e2";
+    ctx.font = "15px monospace";
+    ctx.fillText(`HI-SCORE  ${highScore}`, cx, cy + 26);
     if (newRecord) {
+      // 新記録は金色に点滅
+      const blink = 0.5 + 0.5 * Math.sin(performance.now() / 200);
+      ctx.globalAlpha = 0.5 + blink * 0.5;
       ctx.fillStyle = "#fff36b";
-      ctx.fillText("NEW RECORD!", WIDTH / 2, HEIGHT / 2 + 54);
+      ctx.shadowColor = "#fff36b";
+      ctx.shadowBlur = 12;
+      ctx.font = "bold 18px monospace";
+      ctx.fillText("★ NEW RECORD! ★", cx, cy + 56);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = "#bbbbbb";
+    ctx.fillStyle = "#9aa3b2";
     ctx.font = "14px monospace";
     ctx.fillText(
       showTouchControls ? "タップでタイトルへ" : "Z / Space でタイトルへ",
-      WIDTH / 2,
-      HEIGHT / 2 + 90,
+      cx,
+      cy + 92,
     );
+    ctx.restore();
     ctx.textAlign = "left";
   }
 }
