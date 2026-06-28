@@ -355,8 +355,10 @@ function updateLayer(layer: Deco[], dt: number, margin: number): void {
 // -------------------------------------------------------------------
 // 自機
 // -------------------------------------------------------------------
-const PLAYER_SPEED = 260; // 1秒あたりに動くピクセル数
+const PLAYER_SPEED = 260; // 1秒あたりに動くピクセル数（基本の移動速さ）
 const PLAYER_RADIUS = 11; // 見た目／画面端で止まるときの半径
+const SPEED_MAX = 2; // スピードアップの最大段階（バナナで上がる）
+const SPEED_STEP = 0.2; // 1段階ごとに移動速度が +20%（最大段階で +40%）
 
 const START_LIVES = 3; // 開始時の残機
 const INVINCIBLE_TIME = 2.0; // 被弾後の無敵時間（秒）
@@ -374,6 +376,7 @@ const player = {
   lives: START_LIVES, // 残機
   invincible: 0, // 残りの無敵時間（秒）。0より大きい間は無敵
   power: 1, // ショットの強化段階（1〜POWER_MAX）
+  speedLevel: 0, // スピードアップの段階（0〜SPEED_MAX。バナナで上がる）
   lean: 0, // 首の傾き（-1=左 / 0=正面 / +1=右）。移動方向へなめらかに追従
   bombs: START_BOMBS, // 残りのボム数
 };
@@ -404,6 +407,7 @@ let stageBanner = 0; // 0より大きい間、ステージ名を画面中央に�
 
 // スコア
 const SCORE_ENEMY = 100; // 雑魚1体撃破
+const SCORE_ITEM = 100; // 強化アイテム（キャベツ・バナナ）を拾う
 const SCORE_BOSS = 5000; // ボス撃破
 const SCORE_MIDBOSS = 2000; // 中ボス撃破（ステージ5の宇宙チンパンジー）
 const LIFE_PENALTY = 500; // クリア時、残機が満タンから1減るごとの減点
@@ -458,7 +462,7 @@ const ITEM_RADIUS = 10; // アイテムの大きさ／当たり判定
 const ITEM_SPEED = 90; // アイテムが下りる速さ（px/秒）
 
 // kind … "power"=パワーアップ（キャベツ）／"bomb"=ボム補充（黄金の豚が落とす）
-type Item = { x: number; y: number; kind: "power" | "bomb" };
+type Item = { x: number; y: number; kind: "power" | "bomb" | "speed" };
 const items: Item[] = [];
 
 // -------------------------------------------------------------------
@@ -633,6 +637,21 @@ const enemies: Enemy[] = [];
 // タイムライン進行用：ステージ開始からの経過秒と、次に処理するイベント番号
 let stageTime = 0;
 let nextEventIndex = 0;
+
+// バナナ（スピードアップ）の出現スケジュール。1ステージに2個、道中のランダムな時刻に出す。
+// ボス戦中・中ボス戦中は道中の時間が進まない／ボスがいるので出ない。
+let bananaTimes: number[] = [];
+function scheduleBananas(): void {
+  const lo = 2.0; // 早すぎないように
+  const hi = Math.max(lo + 1, stage.duration - 2.0); // ボス直前は避ける
+  const rand = () => lo + Math.random() * (hi - lo);
+  bananaTimes = [rand(), rand()].sort((a, b) => a - b);
+}
+// バナナを1個、画面の上のランダムな横位置に落とす
+function spawnBanana(): void {
+  const x = ITEM_RADIUS + Math.random() * (WIDTH - ITEM_RADIUS * 2);
+  items.push({ x, y: -ITEM_RADIUS, kind: "speed" });
+}
 
 // 敵を1体作る。from="bottom" のときは画面の下から上へ向かって出る。
 function spawnEnemy(kind: EnemyKind, xRatio: number, from: "top" | "bottom" = "top"): void {
@@ -1145,6 +1164,7 @@ function advanceStage(): void {
   enemyBullets.length = 0;
   bullets.length = 0;
   items.length = 0;
+  scheduleBananas(); // このステージのバナナ出現タイミングを決め直す
   stageBanner = STAGE_BANNER_TIME; // 「STAGE 2」などを表示
   setMusic(stage.normalMusic); // そのステージの道中BGMに切り替え
 }
@@ -1157,6 +1177,7 @@ function resetGame(): void {
   player.lives = START_LIVES;
   player.invincible = 0;
   player.power = 1;
+  player.speedLevel = 0; // スピードアップもリセット
   player.lean = 0;
   optionTurtle.active = false; // お供の小亀はリセット（5段階で再び出現）
   player.bombs = START_BOMBS;
@@ -1178,6 +1199,7 @@ function resetGame(): void {
   stageBanner = STAGE_BANNER_TIME; // 「STAGE 1」を表示
   stageTime = 0;
   nextEventIndex = 0;
+  scheduleBananas(); // ステージ1のバナナ出現タイミングを決める
   defeated = 0;
   score = 0;
   clearLifePenalty = 0;
@@ -1306,8 +1328,10 @@ function update(dt: number): void {
     dy = touchDirY;
   }
 
-  player.x += dx * PLAYER_SPEED * dt;
-  player.y += dy * PLAYER_SPEED * dt;
+  // スピードアップ段階に応じて移動速度を上げる（バナナ1個ごとに +20%）
+  const moveSpeed = PLAYER_SPEED * (1 + player.speedLevel * SPEED_STEP);
+  player.x += dx * moveSpeed * dt;
+  player.y += dy * moveSpeed * dt;
 
   // 首の傾きを、今の左右入力（-1/0/+1）へなめらかに近づける
   const leanTarget = Math.sign(dx);
@@ -1377,6 +1401,13 @@ function update(dt: number): void {
       const ev = stage.timeline[nextEventIndex];
       spawnEnemy(ev.kind, ev.x, ev.from);
       nextEventIndex += 1;
+    }
+
+    // バナナ（スピードアップ）の出現：予定時刻に達したら落とす。
+    // ボスがいる間は出さない（道中だけ）。中ボス戦中はこのブロック自体が動かない。
+    while (!boss && bananaTimes.length > 0 && bananaTimes[0] <= stageTime) {
+      bananaTimes.shift();
+      spawnBanana();
     }
   }
 
@@ -1498,8 +1529,12 @@ function update(dt: number): void {
       items.splice(i, 1);
       if (it.kind === "bomb") {
         player.bombs = Math.min(MAX_BOMBS, player.bombs + 1); // ボムを1つ補充
+      } else if (it.kind === "speed") {
+        player.speedLevel = Math.min(SPEED_MAX, player.speedLevel + 1); // スピード1段階アップ
+        score += SCORE_ITEM; // 強化アイテム取得で+100点
       } else {
         player.power = Math.min(POWER_MAX, player.power + 1); // 1段階アップ
+        score += SCORE_ITEM; // 強化アイテム取得で+100点
       }
     } else if (it.y > HEIGHT + ITEM_RADIUS) {
       items.splice(i, 1); // 拾えず画面下へ
@@ -1884,6 +1919,53 @@ function drawCabbage(cx: number, cy: number): void {
   ctx.beginPath();
   ctx.arc(0, 1, 1.6, 0, Math.PI * 2);
   ctx.fill();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// スピードアップアイテムをバナナの姿で描く。(cx, cy) が中心。
+// -------------------------------------------------------------------
+function drawBanana(cx: number, cy: number): void {
+  const s = ITEM_RADIUS / 10; // ITEM_RADIUS に合わせて拡大縮小
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(s, s);
+  ctx.rotate(-0.5); // 少し斜めに
+
+  // バナナの三日月形（外側＝黄、内側をくり抜いた形）
+  ctx.fillStyle = "#ffcf33";
+  ctx.beginPath();
+  ctx.moveTo(-7, 7);
+  ctx.quadraticCurveTo(-10, -6, 2, -9); // 外側のカーブ（上）
+  ctx.quadraticCurveTo(-2, -3, -3, 4); // 内側のカーブ（下）へ戻る
+  ctx.quadraticCurveTo(-5, 6, -7, 7);
+  ctx.closePath();
+  ctx.fill();
+
+  // 明るいハイライト
+  ctx.fillStyle = "#ffe27a";
+  ctx.beginPath();
+  ctx.moveTo(-6, 5);
+  ctx.quadraticCurveTo(-8, -4, 1, -7);
+  ctx.quadraticCurveTo(-3, -2, -4, 4);
+  ctx.closePath();
+  ctx.fill();
+
+  // 両端の茶色いヘタ
+  ctx.fillStyle = "#7a5a2a";
+  ctx.beginPath();
+  ctx.arc(2, -9, 1.6, 0, Math.PI * 2);
+  ctx.arc(-7, 7, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 稜線（バナナの筋）
+  ctx.strokeStyle = "#e0a91f";
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(-5.5, 5);
+  ctx.quadraticCurveTo(-8, -3, 0.5, -7.5);
+  ctx.stroke();
 
   ctx.restore();
 }
@@ -4404,9 +4486,10 @@ function render(): void {
     drawEnemy(e);
   }
 
-  // アイテム（キャベツ＝パワーアップ／ボム＝ボム補充）
+  // アイテム（キャベツ＝パワーアップ／バナナ＝スピードアップ／ボム＝ボム補充）
   for (const it of items) {
     if (it.kind === "bomb") drawBombItem(it.x, it.y);
+    else if (it.kind === "speed") drawBanana(it.x, it.y);
     else drawCabbage(it.x, it.y);
   }
 
@@ -4570,6 +4653,18 @@ function render(): void {
   ctx.font = "12px monospace";
   ctx.fillStyle = "#ff5c7a";
   ctx.fillText("♥".repeat(Math.max(0, player.lives)) || "—", tx, hudY + 49);
+
+  // スピード（バナナで上がる小さな2段の印。残機の右側に置く）
+  ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+  ctx.font = "8px monospace";
+  ctx.fillText("SPD", tx + 66, hudY + 49);
+  for (let i = 0; i < SPEED_MAX; i++) {
+    const bx = tx + 90 + i * 13;
+    ctx.fillStyle = i < player.speedLevel ? "#ffd23b" : "rgba(255, 255, 255, 0.18)";
+    ctx.beginPath();
+    ctx.roundRect(bx, hudY + 43, 10, 7, 2);
+    ctx.fill();
+  }
 
   // パワー（3段の小さなバー）
   ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
