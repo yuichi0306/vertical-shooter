@@ -1128,7 +1128,7 @@ function defeatBoss(): void {
     score = Math.max(0, score - clearLifePenalty);
     resultLock = 0.8;
     saveHighScoreIfNeeded();
-    setMusic(null);
+    setMusic("ending"); // 全クリアのお祝いBGMを流す
   }
 }
 

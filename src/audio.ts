@@ -188,6 +188,11 @@ const NORMAL5_LEAD = [72, 0, 75, 0, 79, 0, 75, 0, 77, 0, 80, 0, 79, 0, 75, 0];
 const BOSS5_BASS = [36, 36, 48, 36, 41, 41, 53, 41, 39, 39, 51, 39, 43, 43, 55, 43];
 const BOSS5_LEAD = [72, 75, 79, 0, 80, 0, 79, 75, 77, 80, 84, 0, 82, 79, 75, 0];
 
+// エンディングBGM（全クリアのお祝い）：明るく弾むハ長調の王道進行 C-G-Am-F。
+// 勝利を祝う、楽しく華やかなメロディ（ベースは root と octave で軽やかに跳ねる）。
+const ENDING_BASS = [36, 48, 36, 48, 43, 55, 43, 55, 45, 57, 45, 57, 41, 53, 41, 53];
+const ENDING_LEAD = [72, 76, 79, 84, 79, 0, 83, 0, 81, 84, 88, 0, 84, 81, 77, 0];
+
 // 各曲の設定（楽譜・ベースの波形・メロディの波形・1ステップの長さ）。
 // leadWave 省略時は square（従来どおり）。triangle にすると柔らかい音色になる。
 // ステップが短い＝速い曲
@@ -217,6 +222,8 @@ const TRACKS = {
   normal5: { bass: NORMAL5_BASS, lead: NORMAL5_LEAD, bassWave: "triangle", stepDur: 0.22, leadWave: "triangle" },
   // ステージ5：最終決戦（壮大で勇ましい sawtooth・速め。中ボスでも流用）
   boss5: { bass: BOSS5_BASS, lead: BOSS5_LEAD, bassWave: "sawtooth", stepDur: 0.14, leadWave: "sawtooth" },
+  // エンディング：全クリアのお祝い（明るく弾む square のメロディ・軽快なテンポ）
+  ending: { bass: ENDING_BASS, lead: ENDING_LEAD, bassWave: "triangle", stepDur: 0.18, leadWave: "square" },
 } satisfies Record<string, TrackDef>;
 
 const MUSIC_VOL = 0.35; // BGM全体の音量（効果音より控えめに）
