@@ -309,6 +309,12 @@ skyGradientIce.addColorStop(0, "#13325a"); // 上空の濃い藍
 skyGradientIce.addColorStop(0.55, "#4f7eb0"); // 中ほどの青
 skyGradientIce.addColorStop(1, "#cfe6f5"); // 下＝雪原の明るい水色
 
+// 宇宙テーマのグラデーション（ステージ5）：ほぼ真っ黒〜深い紫
+const skyGradientSpace = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+skyGradientSpace.addColorStop(0, "#05030f"); // 上＝漆黒
+skyGradientSpace.addColorStop(0.5, "#0c0922"); // 中ほどの濃い紫
+skyGradientSpace.addColorStop(1, "#14082a"); // 下＝深い紫
+
 // 氷の世界の雪（ステージ4）。上から下へ降り、左右にゆれる。下に出たら上へ戻す。
 const snowflakes: Deco[] = [];
 for (let i = 0; i < 60; i++) {
@@ -399,6 +405,7 @@ let stageBanner = 0; // 0より大きい間、ステージ名を画面中央に�
 // スコア
 const SCORE_ENEMY = 100; // 雑魚1体撃破
 const SCORE_BOSS = 5000; // ボス撃破
+const SCORE_MIDBOSS = 2000; // 中ボス撃破（ステージ5の宇宙チンパンジー）
 const LIFE_PENALTY = 500; // クリア時、残機が満タンから1減るごとの減点
 const BOMB_PENALTY = 200; // ボムを1回使うごとの減点
 let score = 0;
@@ -517,6 +524,8 @@ type Boss = {
   spinAngle: number; // うずまき攻撃用の回転角度
   moveTime: number; // 前後（上下）移動用にたまっていく時間
   enraged: boolean; // 怒りモードに入ったか（HP半分以下で true）
+  isMid: boolean; // 中ボスか（true なら倒しても次ステージへ進まず道中再開）
+  summonTimer: number; // お供（小型メカゴリラ）を呼ぶまでの残り秒（メカ母艦ゴリラ用）
   // --- 突進（酸素ボンベのゴリラ専用）---
   chargeState: "none" | "windup" | "dash" | "back"; // 突進の段階
   chargeTimer: number; // 次の突進までの残り秒（none の間に減る）
@@ -526,6 +535,7 @@ type Boss = {
 };
 let boss: Boss | null = null;
 let bossSpawned = false; // このステージで既にボスを出したか
+let midBossSpawned = false; // このステージで既に中ボスを出したか（ステージ5用）
 
 // -------------------------------------------------------------------
 // 敵
@@ -560,6 +570,18 @@ const YUKIDARUMA_HP = 2; // 雪だるま：少し硬い（2発）
 const YUKIDARUMA_SPEED = 52; // 雪だるま：ゆっくり下りる速さ（カタツムリくらい）
 const YUKIDARUMA_FIRE_INTERVAL = 2.4; // 雪だるま：たまに自機へ弾を撃つ間隔（秒）
 
+// ステージ5（宇宙）の敵。動きは既存を流用：
+//   UFO＝シロクマ（ふらふら撃つ・硬め）、隕石＝マグロ（まっすぐ速い）、
+//   エイリアン＝蛇（くねって撃つ）、衛星ロボ＝雪だるま（ゆっくり＋たまに撃つ・倒すと爆発）
+const UFO_HP = 3; // UFO：硬め（3発。シロクマと同じ）
+const SATELLITE_HP = 2; // 衛星ロボ：少し硬い（2発）。倒すと爆発
+const SATELLITE_BLAST_RADIUS = ENEMY_RADIUS * 3.0; // 衛星ロボの爆風（雪だるまの2倍範囲）
+// ラスボス（メカ母艦ゴリラ）が戦闘中に射出する「お供」＝小型メカゴリラ
+const MINION_HP = 2; // 小型メカゴリラ：2発で撃破
+const SUMMON_INTERVAL = 4.5; // お供を呼ぶ間隔（秒）
+const SUMMON_INTERVAL_ENRAGED = 2.8; // 怒り時はもっと頻繁に呼ぶ
+const MINION_MAX = 3; // 同時に存在できるお供の上限（増えすぎ防止）
+
 // エンジェル（お助けキャラ）：黄金の豚と同じく横切りつつ、上下にも大きく動く
 const ANGEL_SPEED = 110; // 画面を横切る速さ（px/秒）
 const ANGEL_Y = 200; // 上下の動きの中心の高さ
@@ -581,6 +603,11 @@ const ENEMY_EXPLOSION_COLOR: Record<EnemyKind, string> = {
   penguin: "#cfe9f5", // ペンギン＝白っぽい水色
   shirokuma: "#eaf3fb", // シロクマ＝白
   yukidaruma: "#ffffff", // 雪だるま＝白
+  ufo: "#8ce6ff", // UFO＝水色の光
+  meteor: "#ffae6b", // 隕石＝オレンジの火
+  alien: "#9cff8c", // エイリアン＝黄緑
+  satellite: "#ffd36b", // 衛星ロボ＝金属の黄
+  minionGorilla: "#b9c2d6", // 小型メカゴリラ＝銀色
 };
 
 // kind … 敵の種類、baseX … 揺れの基準になる横位置、age … 出現からの経過秒
@@ -619,14 +646,14 @@ function spawnEnemy(kind: EnemyKind, xRatio: number, from: "top" | "bottom" = "t
   let hp = ENEMY_HP;
   let vx = 0;
   let vy = 0;
-  if (kind === "eagle" || kind === "squid" || kind === "shirokuma") {
-    // イカ・シロクマは鷲と同じ動き（ふらふら動いて撃つ）。シロクマだけ硬い
-    hp = kind === "shirokuma" ? SHIROKUMA_HP : EAGLE_HP;
+  if (kind === "eagle" || kind === "squid" || kind === "shirokuma" || kind === "ufo") {
+    // イカ・シロクマ・UFOは鷲と同じ動き（ふらふら動いて撃つ）。シロクマ・UFOは硬い
+    hp = kind === "shirokuma" ? SHIROKUMA_HP : kind === "ufo" ? UFO_HP : EAGLE_HP;
     fireTimer = EAGLE_FIRE_INTERVAL * (0.5 + Math.random());
     vy = EAGLE_FALL_SPEED * dir; // 進む向き（下から出たら上へ）
-  } else if (kind === "yukidaruma") {
-    // 雪だるま：ゆっくり下りつつ、たまに撃つ（少し硬い）
-    hp = YUKIDARUMA_HP;
+  } else if (kind === "yukidaruma" || kind === "satellite") {
+    // 雪だるま・衛星ロボ：ゆっくり下りつつ、たまに撃つ（少し硬い）。倒すと爆発
+    hp = kind === "satellite" ? SATELLITE_HP : YUKIDARUMA_HP;
     fireTimer = YUKIDARUMA_FIRE_INTERVAL * (0.6 + Math.random() * 0.8);
   } else if (kind === "goldpig") {
     hp = GOLDPIG_HP;
@@ -678,8 +705,9 @@ function fireShot(): void {
   }
 }
 
-// ボスを登場させる（種類はステージごとに決まる）
-function spawnBoss(kind: BossKind): void {
+// ボスを登場させる（種類はステージごとに決まる）。
+// isMid=true なら中ボス（倒しても次ステージへ進まず、道中が再開する）。
+function spawnBoss(kind: BossKind, isMid = false): void {
   const cfg = BOSS_CONFIG[kind];
   boss = {
     x: WIDTH / 2,
@@ -695,14 +723,34 @@ function spawnBoss(kind: BossKind): void {
     spinAngle: 0,
     moveTime: 0,
     enraged: false,
+    isMid,
+    summonTimer: SUMMON_INTERVAL,
     chargeState: "none",
     chargeTimer: cfg.chargeInterval || 999, // 0（突進なし）のボスは事実上発動しない
     chargeStateTimer: 0,
     chargeVX: 0,
     chargeVY: 0,
   };
-  bossSpawned = true;
-  setMusic(stage.bossMusic); // ボス登場でそのステージのボスBGMに切り替え
+  if (!isMid) bossSpawned = true; // 中ボスは「ステージのボスを出した」扱いにしない
+  setMusic(stage.bossMusic); // ボス登場でそのステージのボスBGMに切り替え（中ボスも流用）
+}
+
+// お供（小型メカゴリラ）を1体、母艦の位置あたりから射出する。
+// 動きは鷲と同じ（ふらふら動いて撃つ。spawnEnemy を通さず直接追加）。
+function spawnMinion(x: number, y: number): void {
+  enemies.push({
+    x,
+    y,
+    hp: MINION_HP,
+    kind: "minionGorilla",
+    baseX: x,
+    age: 0,
+    fireTimer: EAGLE_FIRE_INTERVAL * (0.5 + Math.random()),
+    vx: (Math.random() * 2 - 1) * EAGLE_WANDER_SPEED,
+    vy: EAGLE_FALL_SPEED,
+    wanderTimer: 0,
+    dir: 1,
+  });
 }
 
 // 敵弾を1発、指定の向き（角度ラジアン）に撃つ
@@ -870,6 +918,42 @@ const BOSS_CONFIG: Record<BossKind, BossConfig> = {
     chargeIntervalEnraged: 3.2,
     chargeSpeed: 450,
   },
+  // ステージ5：宇宙チンパンジー（中ボス）。素早く動くが体力は控えめ
+  spaceChimp: {
+    maxHp: 95,
+    swaySpeed: 120, // すばしっこく左右に動く
+    swaySpeedEnraged: 170,
+    bobAmplitude: 35, // 前後にもひょいひょい動く
+    bobSpeed: 1.8,
+    fireInterval: 1.2,
+    fireIntervalEnraged: 0.7,
+    patterns: [bossPatternAimed, bossPatternFan, bossPatternAimedWide],
+    chargeInterval: 0, // 突進しない
+    chargeIntervalEnraged: 0,
+    chargeSpeed: 0,
+  },
+  // ステージ5：メカ母艦ゴリラ（ラスボス）。シリーズ最高HP＋全技＋お供を射出
+  motherGorilla: {
+    maxHp: 260, // シリーズ最高の体力
+    swaySpeed: 80,
+    swaySpeedEnraged: 130,
+    bobAmplitude: 55, // 前後にも大きく動く
+    bobSpeed: 1.2,
+    fireInterval: 0.95, // 攻撃が激しい
+    fireIntervalEnraged: 0.55,
+    patterns: [
+      bossPatternAimedWide,
+      bossPatternFan,
+      bossPatternRing,
+      bossPatternTwinStream,
+      bossPatternIcicles, // 上から降り注ぐ弾も流用
+      bossPatternSpiral,
+      bossPatternAimed,
+    ],
+    chargeInterval: 6.0, // たまに突進
+    chargeIntervalEnraged: 3.5,
+    chargeSpeed: 460,
+  },
 };
 
 // 突進（酸素ボンベのゴリラ専用）の状態を進める。
@@ -946,14 +1030,28 @@ function damagePlayer(): void {
   }
 }
 
-// 雪だるまは倒されると爆発する。爆風の範囲は当たり判定(ENEMY_RADIUS)の1.5倍。
-// その範囲内に自機がいれば被弾する（近くで倒すと危ない）。無敵中はノーダメージ。
-function snowmanExplode(x: number, y: number): void {
-  const radius = ENEMY_RADIUS * 1.5; // 爆風の半径（約21px）
-  spawnExplosion(x, y, "#dff0fb", 26); // 白い大きめの爆風エフェクト
+// 倒すと爆発する敵の共通処理。範囲内に自機がいれば被弾（無敵中はノーダメージ）。
+function blastExplode(x: number, y: number, radius: number, color: string, count: number): void {
+  spawnExplosion(x, y, color, count);
   if (player.invincible <= 0 && hit(x, y, radius, player.x, player.y, PLAYER_RADIUS)) {
     damagePlayer();
   }
+}
+
+// 雪だるまは倒されると爆発する。爆風の範囲は当たり判定(ENEMY_RADIUS)の1.5倍（約21px）。
+function snowmanExplode(x: number, y: number): void {
+  blastExplode(x, y, ENEMY_RADIUS * 1.5, "#dff0fb", 26);
+}
+
+// 衛星ロボは倒されると爆発する。爆風の範囲は雪だるまの2倍（ENEMY_RADIUS*3.0＝約48px）。
+function satelliteExplode(x: number, y: number): void {
+  blastExplode(x, y, SATELLITE_BLAST_RADIUS, "#ffe39a", 40);
+}
+
+// 敵が倒れたときに「爆発する敵」なら爆風を出す（雪だるま・衛星ロボ）。
+function explodeOnDeath(e: Enemy): void {
+  if (e.kind === "yukidaruma") snowmanExplode(e.x, e.y);
+  else if (e.kind === "satellite") satelliteExplode(e.x, e.y);
 }
 
 // ボム発動：画面全体を攻撃し、敵弾を消し、しばらく無敵になる
@@ -970,8 +1068,8 @@ function useBomb(): void {
     const e = enemies[i];
     if (e.kind === "angel") continue; // エンジェルは残す
     spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 14);
-    // 雪だるまは倒されると爆発（ボム発動中は無敵なので自機ダメージなし）
-    if (e.kind === "yukidaruma") snowmanExplode(e.x, e.y);
+    // 雪だるま・衛星ロボは倒されると爆発（ボム発動中は無敵なので自機ダメージなし）
+    explodeOnDeath(e);
     score += e.kind === "goldpig" ? SCORE_ENEMY * 2 : SCORE_ENEMY;
     defeated += 1;
     enemies.splice(i, 1);
@@ -1003,10 +1101,23 @@ function defeatBoss(): void {
         ? "#7fffe0"
         : boss.kind === "snowGorilla"
           ? "#cdeefb"
-          : "#b15cff";
+          : boss.kind === "spaceChimp"
+            ? "#ffd27f"
+            : boss.kind === "motherGorilla"
+              ? "#9fb4ff"
+              : "#b15cff";
   spawnExplosion(boss.x, boss.y, color, 70); // 大きな爆発
   playBossExplosion();
+  const wasMid = boss.isMid;
   boss = null;
+
+  // 中ボスを倒したとき：ステージは進めず、道中を再開する（雑魚出現が再びはじまる）
+  if (wasMid) {
+    score += SCORE_MIDBOSS;
+    setMusic(stage.normalMusic); // 道中BGMに戻す
+    return;
+  }
+
   score += SCORE_BOSS;
   if (stageIndex < STAGES.length - 1) {
     advanceStage(); // 次のステージへ（連戦）
@@ -1029,6 +1140,7 @@ function advanceStage(): void {
   stageTime = 0;
   nextEventIndex = 0;
   bossSpawned = false;
+  midBossSpawned = false;
   enemies.length = 0;
   enemyBullets.length = 0;
   bullets.length = 0;
@@ -1059,6 +1171,7 @@ function resetGame(): void {
   particles.length = 0;
   boss = null;
   bossSpawned = false;
+  midBossSpawned = false;
   stageIndex = 0; // 最初のステージから
   stage = STAGES[0];
   theme = stage.theme;
@@ -1253,15 +1366,18 @@ function update(dt: number): void {
   if (stageBanner > 0) stageBanner -= dt;
 
   // --- 敵の出現（データ駆動タイムライン）---
-  stageTime += dt;
-  // 「今の時刻」に達したイベントを順番に処理する
-  while (
-    nextEventIndex < stage.timeline.length &&
-    stage.timeline[nextEventIndex].time <= stageTime
-  ) {
-    const ev = stage.timeline[nextEventIndex];
-    spawnEnemy(ev.kind, ev.x, ev.from);
-    nextEventIndex += 1;
+  // 中ボスと戦っている間は道中の時間を止める（雑魚も出さず、中ボスに集中させる）
+  if (!(boss && boss.isMid)) {
+    stageTime += dt;
+    // 「今の時刻」に達したイベントを順番に処理する
+    while (
+      nextEventIndex < stage.timeline.length &&
+      stage.timeline[nextEventIndex].time <= stageTime
+    ) {
+      const ev = stage.timeline[nextEventIndex];
+      spawnEnemy(ev.kind, ev.x, ev.from);
+      nextEventIndex += 1;
+    }
   }
 
   // --- 敵の移動（種類ごとに動きが違う）---
@@ -1270,8 +1386,8 @@ function update(dt: number): void {
     if (e.kind === "snail") {
       // カタツムリ：ほとんど動かず、ゆっくり下りる（dir=-1なら上る）だけ
       e.y += SNAIL_SPEED * dt * e.dir;
-    } else if (e.kind === "yukidaruma") {
-      // 雪だるま：カタツムリのようにゆっくり下りつつ、たまに自機へ弾を撃つ
+    } else if (e.kind === "yukidaruma" || e.kind === "satellite") {
+      // 雪だるま・衛星ロボ：ゆっくり下りつつ、たまに自機へ弾を撃つ
       e.y += YUKIDARUMA_SPEED * dt * e.dir;
       e.fireTimer -= dt;
       if (e.fireTimer <= 0 && e.y > 0 && e.y < HEIGHT - 80) {
@@ -1279,8 +1395,13 @@ function update(dt: number): void {
         fireEnemyBullet(e.x, e.y, angle);
         e.fireTimer = YUKIDARUMA_FIRE_INTERVAL;
       }
-    } else if (e.kind === "snake" || e.kind === "jellyfish" || e.kind === "penguin") {
-      // 蛇・クラゲ・ペンギン：基準位置を中心に、サイン波で左右にくねりながら下りる（dir=-1なら上る）
+    } else if (
+      e.kind === "snake" ||
+      e.kind === "jellyfish" ||
+      e.kind === "penguin" ||
+      e.kind === "alien"
+    ) {
+      // 蛇・クラゲ・ペンギン・エイリアン：基準位置を中心に、サイン波で左右にくねりながら下りる（dir=-1なら上る）
       e.y += ENEMY_SPEED * dt * e.dir;
       e.x = e.baseX + Math.sin(e.age * SNAKE_FREQ) * SNAKE_AMPLITUDE;
       // 画面内にいる間はたまに自機へ弾を撃つ
@@ -1290,8 +1411,8 @@ function update(dt: number): void {
         fireEnemyBullet(e.x, e.y, angle);
         e.fireTimer = SNAKE_FIRE_INTERVAL;
       }
-    } else if (e.kind === "tuna" || e.kind === "tsurara") {
-      // マグロ・つらら：まっすぐ進む、ただし速い（黄金の豚の2倍速）。dir=-1なら下から上へ
+    } else if (e.kind === "tuna" || e.kind === "tsurara" || e.kind === "meteor") {
+      // マグロ・つらら・隕石：まっすぐ進む、ただし速い（黄金の豚の2倍速）。dir=-1なら下から上へ
       e.y += TUNA_SPEED * dt * e.dir;
     } else if (e.kind === "spider") {
       // 蜘蛛：糸で上下に伸び縮みしながら（縦に動いて）下りる。
@@ -1306,7 +1427,7 @@ function update(dt: number): void {
       e.x += e.vx * dt;
       e.y = ANGEL_Y + Math.sin(e.age * 2.2) * ANGEL_AMP;
     } else {
-      // 鷲・イカ・シロクマ：一定時間ごとに進む向きをランダムに変えて、ふらふら動き回る。
+      // 鷲・イカ・シロクマ・UFO・小型メカゴリラ：一定時間ごとに進む向きをランダムに変えて、ふらふら動き回る。
       // 横は気まぐれ、縦は必ず少しずつ下りる（いつか画面外へ出る）。
       e.wanderTimer -= dt;
       if (e.wanderTimer <= 0) {
@@ -1361,8 +1482,8 @@ function update(dt: number): void {
             }
           }
           playExplosion();
-          // 雪だるまは倒されると爆発（範囲内の自機にダメージ）
-          if (e.kind === "yukidaruma") snowmanExplode(e.x, e.y);
+          // 雪だるま・衛星ロボは倒されると爆発（範囲内の自機にダメージ）
+          explodeOnDeath(e);
         }
         break; // この弾はもう消えたので、次の弾へ
       }
@@ -1423,8 +1544,21 @@ function update(dt: number): void {
     }
   }
 
+  // --- 中ボスの登場（ステージ5）：途中の時刻に達し、雑魚を片付けたら出現。
+  //     倒すまで道中の時間は止まる（上のタイムライン処理を参照）---
+  if (
+    stage.midBoss &&
+    !midBossSpawned &&
+    !boss &&
+    stageTime >= (stage.midBossTime ?? 0) &&
+    enemies.length === 0
+  ) {
+    spawnBoss(stage.midBoss, true); // isMid=true（中ボス）
+    midBossSpawned = true;
+  }
+
   // --- ボスの登場：道中が終わり、雑魚を全部片付けたら出現 ---
-  if (!bossSpawned && stageTime >= stage.duration && enemies.length === 0) {
+  if (!bossSpawned && !boss && stageTime >= stage.duration && enemies.length === 0) {
     spawnBoss(stage.boss);
   }
 
@@ -1438,6 +1572,18 @@ function update(dt: number): void {
       boss.enraged = true;
       spawnExplosion(boss.x, boss.y, "#ff3b3b", 30); // 赤い怒りの演出
       playBossHit();
+    }
+
+    // メカ母艦ゴリラ（ラスボス）：戦闘中、たまにお供（小型メカゴリラ）を射出する
+    if (boss.kind === "motherGorilla" && boss.phase === "fight") {
+      boss.summonTimer -= dt;
+      if (boss.summonTimer <= 0) {
+        const active = enemies.reduce((n, e) => n + (e.kind === "minionGorilla" ? 1 : 0), 0);
+        if (active < MINION_MAX) {
+          spawnMinion(boss.x + (Math.random() * 50 - 25), boss.y + 24);
+        }
+        boss.summonTimer = boss.enraged ? SUMMON_INTERVAL_ENRAGED : SUMMON_INTERVAL;
+      }
     }
 
     if (boss.phase === "enter") {
@@ -2555,18 +2701,292 @@ function drawSnowman(cx: number, cy: number, age: number): void {
   ctx.restore();
 }
 
+// 敵：UFO（ステージ5）。銀色の円盤＋光るドーム＋点滅するライト
+function drawUfo(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // 下に伸びる吸引ビーム（ほんのり光る）
+  ctx.save();
+  ctx.globalAlpha = 0.18 + Math.sin(age * 4) * 0.06;
+  ctx.fillStyle = "#8ce6ff";
+  ctx.beginPath();
+  ctx.moveTo(-6, 4);
+  ctx.lineTo(6, 4);
+  ctx.lineTo(13, 20);
+  ctx.lineTo(-13, 20);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // 円盤の本体（横長の楕円）
+  ctx.fillStyle = "#9aa7bd";
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 16, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 円盤のふち（濃いめ）
+  ctx.fillStyle = "#5e6b82";
+  ctx.beginPath();
+  ctx.ellipse(0, 4.5, 16, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 上のドーム（ガラス）
+  ctx.fillStyle = "#bfeaff";
+  ctx.beginPath();
+  ctx.arc(0, 0, 8, Math.PI, 0);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.beginPath();
+  ctx.arc(-2.5, -2, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 底の点滅ライト（3つ・順番に光る）
+  for (let i = -1; i <= 1; i++) {
+    const on = Math.floor(age * 6 + i + 1) % 3 === 0;
+    ctx.fillStyle = on ? "#fff36b" : "#c46cff";
+    ctx.beginPath();
+    ctx.arc(i * 8, 5.5, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+// 敵：隕石（ステージ5）。燃える岩。後ろ（上）に炎の尾を引く
+function drawMeteor(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // 炎の尾（上へ伸びる。ちらちら揺れる）
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const flick = 1 + Math.sin(age * 20) * 0.15;
+  const grad = ctx.createLinearGradient(0, -34 * flick, 0, 0);
+  grad.addColorStop(0, "rgba(255,180,80,0)");
+  grad.addColorStop(0.5, "rgba(255,140,40,0.5)");
+  grad.addColorStop(1, "rgba(255,230,150,0.9)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(-7, -2);
+  ctx.lineTo(0, -34 * flick);
+  ctx.lineTo(7, -2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // 岩の本体（ごつごつした多角形）
+  ctx.fillStyle = "#6b4a3a";
+  ctx.beginPath();
+  ctx.moveTo(-11, 0);
+  ctx.lineTo(-6, -9);
+  ctx.lineTo(5, -10);
+  ctx.lineTo(11, -2);
+  ctx.lineTo(8, 9);
+  ctx.lineTo(-4, 11);
+  ctx.closePath();
+  ctx.fill();
+  // 明るい当たり面（進行方向＝下側を熱で光らせる）
+  ctx.fillStyle = "#a85a2a";
+  ctx.beginPath();
+  ctx.moveTo(-4, 11);
+  ctx.lineTo(8, 9);
+  ctx.lineTo(4, 3);
+  ctx.lineTo(-2, 4);
+  ctx.closePath();
+  ctx.fill();
+  // クレーター（くぼみ）
+  ctx.fillStyle = "#4d352a";
+  ctx.beginPath();
+  ctx.arc(-3, -3, 2.4, 0, Math.PI * 2);
+  ctx.arc(4, -1, 1.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// 敵：エイリアン（ステージ5）。緑の小さな宇宙人。大きな黒い目＋触角
+function drawAlien(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  const wob = Math.sin(age * 4) * 1.5; // ふわふわ揺れる
+
+  // 触角（先に光る玉）
+  ctx.strokeStyle = "#5fbf4a";
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = "round";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 3, -10);
+    ctx.quadraticCurveTo(side * 6, -18, side * 4 + wob, -22);
+    ctx.stroke();
+    ctx.fillStyle = "#bfff6b";
+    ctx.beginPath();
+    ctx.arc(side * 4 + wob, -22, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 体（小さめ・緑）
+  ctx.fillStyle = "#79d65f";
+  ctx.beginPath();
+  ctx.ellipse(0, 8, 7, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 細い腕
+  ctx.strokeStyle = "#5fbf4a";
+  ctx.lineWidth = 2;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 5, 5);
+    ctx.lineTo(side * 11, 10 + wob);
+    ctx.stroke();
+  }
+
+  // 頭（大きい・緑）
+  ctx.fillStyle = "#8fe06f";
+  ctx.beginPath();
+  ctx.ellipse(0, -4, 11, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 大きな黒いアーモンド型の目
+  ctx.fillStyle = "#1b2530";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(side * 4.5, -4, 3, 4.5, side * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 目のハイライト
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(side * 5, -6, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+// 敵：衛星ロボ（ステージ5）。金属の箱＋ソーラーパネルの翼＋点滅する赤い目。倒すと爆発
+function drawSatellite(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(Math.sin(age * 1.5) * 0.15); // ゆっくり傾く
+
+  // ソーラーパネルの翼（左右）
+  ctx.fillStyle = "#27538a";
+  ctx.strokeStyle = "#6f9fd6";
+  ctx.lineWidth = 0.8;
+  for (const side of [-1, 1]) {
+    ctx.fillRect(side * 9, -5, side * 9, 10);
+    // パネルの格子
+    ctx.beginPath();
+    ctx.moveTo(side * 13, -5);
+    ctx.lineTo(side * 13, 5);
+    ctx.moveTo(side * 9, 0);
+    ctx.lineTo(side * 18, 0);
+    ctx.stroke();
+  }
+
+  // 本体（金属の箱）
+  ctx.fillStyle = "#aeb8c8";
+  ctx.fillRect(-8, -8, 16, 16);
+  ctx.fillStyle = "#7e8a9e";
+  ctx.fillRect(-8, 3, 16, 5); // 下の影
+  // ふち
+  ctx.strokeStyle = "#4d566a";
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(-8, -8, 16, 16);
+
+  // 点滅する赤い目（カメラ）
+  const blink = Math.floor(age * 5) % 2 === 0;
+  ctx.fillStyle = blink ? "#ff5b5b" : "#7a2a2a";
+  ctx.beginPath();
+  ctx.arc(0, 0, 3.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.beginPath();
+  ctx.arc(-1, -1, 1, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 上のアンテナ
+  ctx.strokeStyle = "#cfd6e2";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(0, -8);
+  ctx.lineTo(0, -14);
+  ctx.stroke();
+  ctx.fillStyle = "#ffd36b";
+  ctx.beginPath();
+  ctx.arc(0, -15, 1.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// 敵：小型メカゴリラ（ステージ5・お供）。ラスボスが射出する銀色の小さいメカゴリラ
+function drawMinionGorilla(cx: number, cy: number, age: number): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  const sway = Math.sin(age * 6) * 1.2; // 手足を小刻みに動かす
+
+  // 腕（左右・銀）
+  ctx.fillStyle = "#8f9aae";
+  for (const side of [-1, 1]) {
+    ctx.save();
+    ctx.translate(side * 11, 0);
+    ctx.rotate(side * sway * 0.1);
+    ctx.fillRect(-3, -3, 6, 12);
+    // こぶし
+    ctx.beginPath();
+    ctx.arc(0, 10, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 胴体（銀の箱・丸み）
+  ctx.fillStyle = "#b9c2d6";
+  ctx.beginPath();
+  ctx.roundRect(-9, -6, 18, 16, 4);
+  ctx.fill();
+  // 胸のコア（青く光る）
+  ctx.fillStyle = "#5cd6ff";
+  ctx.beginPath();
+  ctx.arc(0, 2, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 頭（メカゴリラ顔・光るバイザーの目）
+  ctx.fillStyle = "#9aa7bd";
+  ctx.beginPath();
+  ctx.roundRect(-7, -15, 14, 11, 3);
+  ctx.fill();
+  // バイザー（横長に光る赤い目）
+  ctx.fillStyle = "#1b2430";
+  ctx.fillRect(-5.5, -12, 11, 4);
+  ctx.fillStyle = "#ff6b6b";
+  ctx.fillRect(-4.5, -11, 9, 2);
+
+  // 足（左右・小刻みに動く）
+  ctx.fillStyle = "#8f9aae";
+  for (const side of [-1, 1]) {
+    ctx.fillRect(side * 5 - 2.5, 9, 5, 6 + side * sway);
+  }
+
+  ctx.restore();
+}
+
 // 敵を種類に応じた姿で描く
 function drawEnemy(e: Enemy): void {
   // 下から上る敵（dir<0）は絵を上下に反転して進行方向（上）を向かせる。
-  // ただしクラゲ・イカ・ペンギン・シロクマ・雪だるまは上向きでも不自然なので反転しない
-  // （つららは反転して進行方向＝上を向くと自然なので反転対象のまま）。
+  // ただしクラゲ・イカ・ペンギン・シロクマ・雪だるま・エイリアン・衛星ロボ・UFOは
+  // 上向きでも不自然なので反転しない（つらら・隕石は反転して進行方向＝上を向くと自然）。
   const flip =
     e.dir < 0 &&
     e.kind !== "jellyfish" &&
     e.kind !== "squid" &&
     e.kind !== "penguin" &&
     e.kind !== "shirokuma" &&
-    e.kind !== "yukidaruma";
+    e.kind !== "yukidaruma" &&
+    e.kind !== "alien" &&
+    e.kind !== "satellite" &&
+    e.kind !== "ufo";
   if (flip) {
     ctx.save();
     ctx.translate(e.x, e.y);
@@ -2586,6 +3006,11 @@ function drawEnemy(e: Enemy): void {
   else if (e.kind === "penguin") drawPenguin(cx, cy, e.age);
   else if (e.kind === "shirokuma") drawPolarBear(cx, cy, e.age);
   else if (e.kind === "yukidaruma") drawSnowman(cx, cy, e.age);
+  else if (e.kind === "ufo") drawUfo(cx, cy, e.age);
+  else if (e.kind === "meteor") drawMeteor(cx, cy, e.age);
+  else if (e.kind === "alien") drawAlien(cx, cy, e.age);
+  else if (e.kind === "satellite") drawSatellite(cx, cy, e.age);
+  else if (e.kind === "minionGorilla") drawMinionGorilla(cx, cy, e.age);
   else drawGoldPig(cx, cy, e.age);
   if (flip) ctx.restore();
 }
@@ -3284,6 +3709,314 @@ function drawCloudWhite(d: Deco): void {
   }
 }
 
+// -------------------------------------------------------------------
+// ボス：宇宙チンパンジー（ステージ5の中ボス）。(cx, cy) が中心。
+//   宇宙服＋ガラスのヘルメットをかぶった、すばしっこいチンパンジー。
+//   walk が大きいほど腕足が振れる。enraged=true で目とオーラが赤い。
+// -------------------------------------------------------------------
+function drawSpaceChimpBoss(cx: number, cy: number, walk: number, enraged = false): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const swing = Math.sin(walk);
+  const bob = Math.sin(walk * 2) * 2;
+  const glow = enraged ? "#ff4040" : "#7df9ff";
+
+  // 怒りモードでは赤いオーラが脈打つ
+  if (enraged) {
+    const pulse = 0.5 + 0.5 * Math.sin(walk * 1.5);
+    ctx.save();
+    ctx.globalAlpha = 0.22 + pulse * 0.22;
+    ctx.fillStyle = "#ff3b3b";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 38 + pulse * 5, 44 + pulse * 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.translate(0, bob);
+
+  const SUIT = "#dfe6f0"; // 宇宙服の白
+  const SUIT_DARK = "#9aa6ba"; // 影
+  const FUR = "#6b4a35"; // チンパンジーの茶色
+
+  // --- ジェットパックの噴射（背中の左右から下へ）---
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const side of [-1, 1]) {
+    const f = 0.7 + Math.random() * 0.3;
+    const g = ctx.createLinearGradient(side * 16, 18, side * 16, 40 * f);
+    g.addColorStop(0, "rgba(255,210,120,0.8)");
+    g.addColorStop(1, "rgba(255,120,40,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(side * 12, 18);
+    ctx.lineTo(side * 20, 18);
+    ctx.lineTo(side * 16, 40 * f);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // --- 足（宇宙ブーツ。左右で逆に踏み出す）---
+  ctx.fillStyle = SUIT;
+  for (const side of [-1, 1]) {
+    const step = side === -1 ? swing * 5 : -swing * 5;
+    ctx.fillRect(side * 9 - 6, 16, 12, 14);
+    ctx.fillStyle = SUIT_DARK;
+    ctx.fillRect(side * 9 - 8 + step, 28, 16, 6); // ブーツの底
+    ctx.fillStyle = SUIT;
+  }
+
+  // --- 腕（長いゴリラ的な腕。足と逆に振る。手は茶色い毛）---
+  for (const side of [-1, 1]) {
+    const sw = side * swing * 7;
+    ctx.strokeStyle = SUIT;
+    ctx.lineWidth = 12;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(side * 14, -8);
+    ctx.lineTo(side * 22, 22 + sw);
+    ctx.stroke();
+    // 手（茶色い毛）
+    ctx.fillStyle = FUR;
+    ctx.beginPath();
+    ctx.arc(side * 22, 26 + sw, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- 胴体（宇宙服）---
+  ctx.fillStyle = SUIT;
+  ctx.beginPath();
+  ctx.roundRect(-17, -14, 34, 34, 8);
+  ctx.fill();
+  ctx.strokeStyle = SUIT_DARK;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // 胸のコントロールパネル（光る）
+  ctx.fillStyle = "#1b2430";
+  ctx.beginPath();
+  ctx.roundRect(-9, -2, 18, 12, 3);
+  ctx.fill();
+  for (let i = -1; i <= 1; i++) {
+    ctx.fillStyle = i === 0 ? glow : "#ffd36b";
+    ctx.beginPath();
+    ctx.arc(i * 5, 4, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- 頭（チンパンジーの顔＋ガラスのヘルメット）---
+  // 大きな耳
+  ctx.fillStyle = FUR;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(side * 13, -30, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 顔（茶色の頭＋うすい肌色の顔）
+  ctx.fillStyle = FUR;
+  ctx.beginPath();
+  ctx.arc(0, -30, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#e8c8a8";
+  ctx.beginPath();
+  ctx.ellipse(0, -28, 8, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 目
+  ctx.fillStyle = enraged ? "#ff4040" : "#3a2a20";
+  ctx.beginPath();
+  ctx.arc(-3.5, -30, 2, 0, Math.PI * 2);
+  ctx.arc(3.5, -30, 2, 0, Math.PI * 2);
+  ctx.fill();
+  // 鼻と口
+  ctx.strokeStyle = "#8a6a50";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(0, -24, 3, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+  // ガラスのヘルメット（半透明のドーム＋反射）
+  ctx.strokeStyle = "rgba(160, 220, 255, 0.9)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, -29, 16, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(180, 230, 255, 0.12)";
+  ctx.beginPath();
+  ctx.arc(0, -29, 16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.6)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, -29, 12, Math.PI * 1.1, Math.PI * 1.5);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// -------------------------------------------------------------------
+// ボス：メカ母艦ゴリラ（ステージ5のラスボス）。(cx, cy) が中心。
+//   巨大戦艦と一体化した機械ゴリラ。機械ゴリラの最終進化版。
+//   walk が大きいほど腕足が振れる。enraged=true で目とオーラが赤い。
+// -------------------------------------------------------------------
+function drawMotherGorillaBoss(cx: number, cy: number, walk: number, enraged = false): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  const swing = Math.sin(walk);
+  const bob = Math.sin(walk * 2) * 1.2;
+  const glow = enraged ? "#ff4040" : "#9fb4ff";
+
+  // 怒りモードでは赤いオーラが脈打つ（大きめ）
+  if (enraged) {
+    const pulse = 0.5 + 0.5 * Math.sin(walk * 1.5);
+    ctx.save();
+    ctx.globalAlpha = 0.22 + pulse * 0.22;
+    ctx.fillStyle = "#ff3b3b";
+    ctx.beginPath();
+    ctx.ellipse(0, 2, 52 + pulse * 6, 50 + pulse * 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.translate(0, bob);
+
+  const HULL = "#3b4a63"; // 母艦の濃紺の装甲
+  const HULL_LIGHT = "#5a6f93"; // 明るい装甲
+  const METAL = "#8a93a3"; // ゴリラ部分の金属
+  const METAL_DARK = "#525a68";
+  const JOINT = "#232832";
+
+  // --- 母艦の翼／スラスター（左右に大きく張り出す）---
+  for (const side of [-1, 1]) {
+    ctx.fillStyle = HULL;
+    ctx.beginPath();
+    ctx.moveTo(side * 18, 4);
+    ctx.lineTo(side * 46, -6);
+    ctx.lineTo(side * 50, 8);
+    ctx.lineTo(side * 20, 18);
+    ctx.closePath();
+    ctx.fill();
+    // 翼端のスラスター（光る）
+    ctx.fillStyle = glow;
+    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(walk * 3);
+    ctx.beginPath();
+    ctx.arc(side * 47, 1, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    // 砲口（翼の下に2門）
+    ctx.fillStyle = METAL_DARK;
+    ctx.fillRect(side * 30 - 3, 14, 6, 8);
+    ctx.fillRect(side * 40 - 3, 12, 6, 8);
+  }
+
+  // --- 足（角ばった脚。左右で逆に踏み出す）---
+  ctx.fillStyle = METAL_DARK;
+  for (const side of [-1, 1]) {
+    const sx = side * 12;
+    const step = side === -1 ? swing * 5 : -swing * 5;
+    ctx.fillRect(sx - 8, 20, 16, 16);
+    ctx.fillStyle = JOINT;
+    ctx.fillRect(sx - 10 + step, 36, 20, 6);
+    ctx.fillStyle = METAL_DARK;
+  }
+
+  // --- 腕（太いゴリラの腕。足と逆に振る。先端は大砲のこぶし）---
+  for (const side of [-1, 1]) {
+    const sw = side * swing * 6;
+    const sx = side * 30;
+    ctx.strokeStyle = METAL;
+    ctx.lineWidth = 18;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(side * 18, -10);
+    ctx.lineTo(sx, 28 + sw);
+    ctx.stroke();
+    // こぶし砲
+    ctx.fillStyle = METAL_DARK;
+    ctx.beginPath();
+    ctx.arc(sx, 32 + sw, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(sx, 32 + sw, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- 胴体（母艦の中央ブロック。大きく角ばった装甲）---
+  ctx.fillStyle = HULL_LIGHT;
+  ctx.fillRect(-24, -18, 48, 44);
+  ctx.strokeStyle = "#1b2230";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-24, -18, 48, 44);
+  // 装甲のパネル線
+  ctx.beginPath();
+  ctx.moveTo(-24, 0);
+  ctx.lineTo(24, 0);
+  ctx.moveTo(-12, -18);
+  ctx.lineTo(-12, 26);
+  ctx.moveTo(12, -18);
+  ctx.lineTo(12, 26);
+  ctx.stroke();
+  // 胸の巨大動力コア（強く光る）
+  const corePulse = 0.6 + 0.4 * Math.sin(walk * 3);
+  ctx.fillStyle = glow;
+  ctx.globalAlpha = 0.5 + corePulse * 0.5;
+  ctx.beginPath();
+  ctx.arc(0, 8, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(0, 8, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  // 「お供を出す」格納ハッチ（左右）
+  ctx.fillStyle = "#1b2230";
+  ctx.fillRect(-22, 14, 8, 8);
+  ctx.fillRect(14, 14, 8, 8);
+
+  // --- 頭（金属のゴリラヘルメット。機械ゴリラより厳めしい）---
+  ctx.fillStyle = METAL;
+  ctx.fillRect(-16, -44, 32, 26);
+  ctx.strokeStyle = "#1b2230";
+  ctx.strokeRect(-16, -44, 32, 26);
+  // 側面の耳パーツ
+  ctx.fillStyle = METAL_DARK;
+  ctx.fillRect(-21, -38, 5, 12);
+  ctx.fillRect(16, -38, 5, 12);
+  // バイザー（横長の光る目）
+  ctx.fillStyle = "#15171c";
+  ctx.fillRect(-13, -37, 26, 9);
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(-6, -32.5, 2.8, 0, Math.PI * 2);
+  ctx.arc(6, -32.5, 2.8, 0, Math.PI * 2);
+  ctx.fill();
+  // 2本のアンテナ（王冠のように）
+  ctx.strokeStyle = METAL_DARK;
+  ctx.lineWidth = 2;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 8, -44);
+    ctx.lineTo(side * 11, -54);
+    ctx.stroke();
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(side * 11, -55, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 口元のグリル
+  ctx.strokeStyle = "#1b2230";
+  ctx.lineWidth = 1.5;
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * 6 - 2, -26);
+    ctx.lineTo(i * 6 - 2, -22);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 // 背景をテーマに応じて描く（夜空 or 地球の空）
 function drawBackground(): void {
   if (theme === "night") {
@@ -3314,7 +4047,7 @@ function drawBackground(): void {
     for (const d of farHills) drawSeaRock(d);
     ctx.filter = "none";
     for (const d of bubbles) drawBubble(d);
-  } else {
+  } else if (theme === "ice") {
     // 氷の世界：藍→白のグラデーション → オーロラ → 奥の氷山 → 近い雪の丘 → 降る雪
     ctx.fillStyle = skyGradientIce;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -3326,7 +4059,103 @@ function drawBackground(): void {
     ctx.filter = "none";
     for (const d of nearGround) drawSnowHill(d);
     for (const d of snowflakes) drawSnowflake(d);
+  } else {
+    // 宇宙：漆黒のグラデーション → 星雲 → きらめく星 → 奥の惑星 → 流れ星
+    ctx.fillStyle = skyGradientSpace;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    drawNebula();
+    // きらめく星（時間でちらつかせる）
+    const tw = performance.now() / 400;
+    for (const s of stars) {
+      ctx.globalAlpha = 0.5 + 0.5 * Math.sin(tw + s.x);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(s.x, s.y, s.size, s.size);
+    }
+    ctx.globalAlpha = 1;
+    ctx.filter = "blur(1px)"; // 奥の惑星は少しぼかして遠近感
+    for (const d of farHills) drawPlanet(d);
+    ctx.filter = "none";
+    for (const d of clouds) drawComet(d); // 流れ星
   }
+}
+
+// 宇宙：奥でぼんやり広がる星雲（カラフルな光の雲）。ゆっくり色が脈打つ。
+function drawNebula(): void {
+  const t = performance.now() / 1000;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const blobs: [number, number, number, string][] = [
+    [WIDTH * 0.3, HEIGHT * 0.25, 150, "rgba(120, 70, 200,"], // 紫
+    [WIDTH * 0.7, HEIGHT * 0.45, 170, "rgba(40, 110, 200,"], // 青
+    [WIDTH * 0.5, HEIGHT * 0.7, 160, "rgba(200, 60, 140,"], // ピンク
+  ];
+  for (let i = 0; i < blobs.length; i++) {
+    const [bx, by, r, col] = blobs[i];
+    const pulse = 0.10 + 0.05 * Math.sin(t * 0.5 + i);
+    const g = ctx.createRadialGradient(bx, by, 0, bx, by, r);
+    g.addColorStop(0, col + pulse + ")");
+    g.addColorStop(1, col + "0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  }
+  ctx.restore();
+}
+
+// 宇宙：奥に浮かぶ惑星（リング付きや模様つき）。Deco の x を種類分けに使う。
+function drawPlanet(d: Deco): void {
+  const r = 14 * d.scale;
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  // 惑星ごとに色を変える（x座標から決める）
+  const palette = [
+    ["#c97b4a", "#8a4a26"], // 茶（火星風）
+    ["#5aa0c8", "#2f6890"], // 青
+    ["#c8a85a", "#8a6f2f"], // 黄土（土星風）
+  ];
+  const pi = Math.floor(d.x) % palette.length;
+  const [light, dark] = palette[pi];
+  // 本体
+  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.2, 0, 0, r);
+  g.addColorStop(0, light);
+  g.addColorStop(1, dark);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+  // 土星風のリング（黄土の惑星だけ）
+  if (pi === 2) {
+    ctx.strokeStyle = "rgba(220, 200, 150, 0.7)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 1.7, r * 0.5, -0.4, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// 宇宙：ななめに流れる流れ星（光の尾を引く）。Deco を流用。
+function drawComet(d: Deco): void {
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  ctx.globalCompositeOperation = "lighter";
+  // 尾（左上から右下へ）
+  const len = 30 * d.scale;
+  const g = ctx.createLinearGradient(-len, -len, 0, 0);
+  g.addColorStop(0, "rgba(150, 200, 255, 0)");
+  g.addColorStop(1, "rgba(200, 230, 255, 0.8)");
+  ctx.strokeStyle = g;
+  ctx.lineWidth = 2 * d.scale;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-len, -len);
+  ctx.lineTo(0, 0);
+  ctx.stroke();
+  // 頭の光
+  ctx.fillStyle = "#eaf4ff";
+  ctx.beginPath();
+  ctx.arc(0, 0, 1.8 * d.scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 // 氷の世界：奥でゆらめくオーロラ（緑〜紫の光のカーテン）
@@ -3589,6 +4418,10 @@ function render(): void {
       drawScubaGorilla(boss.x, boss.y, boss.walk, boss.enraged);
     } else if (boss.kind === "snowGorilla") {
       drawSnowGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
+    } else if (boss.kind === "spaceChimp") {
+      drawSpaceChimpBoss(boss.x, boss.y, boss.walk, boss.enraged);
+    } else if (boss.kind === "motherGorilla") {
+      drawMotherGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
     } else {
       drawGorillaBoss(boss.x, boss.y, boss.walk, boss.enraged);
     }
@@ -3604,8 +4437,21 @@ function render(): void {
           ? "#5cffd0"
           : boss.kind === "snowGorilla"
             ? "#bfe8ff"
-            : "#ff5cc8";
+            : boss.kind === "spaceChimp"
+              ? "#7df9ff"
+              : boss.kind === "motherGorilla"
+                ? "#9fb4ff"
+                : "#ff5cc8";
     ctx.fillRect(20, 12, barW * ratio, 10);
+    // 中ボスは「MID BOSS」、ラスボスは「FINAL BOSS」のラベルをHPバーの上に出す
+    if (boss.isMid || boss.kind === "motherGorilla") {
+      ctx.save();
+      ctx.fillStyle = boss.isMid ? "#7df9ff" : "#ffd45c";
+      ctx.font = "bold 11px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(boss.isMid ? "MID BOSS" : "FINAL BOSS", WIDTH / 2, 34);
+      ctx.restore();
+    }
   }
 
   // 敵の弾（赤いまる）
@@ -3788,26 +4634,18 @@ function render(): void {
   }
 
   // 決着画面（ゲームオーバー / クリア）
-  if (gameState === "gameover" || gameState === "clear") {
-    const cleared = gameState === "clear";
+  if (gameState === "clear") {
+    drawEndingScreen();
+  } else if (gameState === "gameover") {
     ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     ctx.textAlign = "center";
-    ctx.fillStyle = cleared ? "#7dff9d" : "#ffffff";
-    ctx.font = "40px monospace";
-    ctx.fillText(cleared ? "STAGE CLEAR!" : "GAME OVER", WIDTH / 2, HEIGHT / 2 - 50);
     ctx.fillStyle = "#ffffff";
+    ctx.font = "40px monospace";
+    ctx.fillText("GAME OVER", WIDTH / 2, HEIGHT / 2 - 50);
     ctx.font = "18px monospace";
     ctx.fillText(`SCORE  ${score}`, WIDTH / 2, HEIGHT / 2);
     ctx.fillText(`HI-SCORE  ${highScore}`, WIDTH / 2, HEIGHT / 2 + 26);
-    // クリア時、残機ぶんの減点があれば理由を表示
-    if (cleared && clearLifePenalty > 0) {
-      ctx.fillStyle = "#ff9a9a";
-      ctx.font = "13px monospace";
-      ctx.fillText(`残機減点  -${clearLifePenalty}`, WIDTH / 2, HEIGHT / 2 - 24);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "18px monospace";
-    }
     if (newRecord) {
       ctx.fillStyle = "#fff36b";
       ctx.fillText("NEW RECORD!", WIDTH / 2, HEIGHT / 2 + 54);
@@ -3821,6 +4659,86 @@ function render(): void {
     );
     ctx.textAlign = "left";
   }
+}
+
+// 全クリアの特別エンディング：これまで倒した5体のゴリラが勢ぞろいするお祝い画面。
+function drawEndingScreen(): void {
+  const t = performance.now() / 1000;
+  // 背景を暗くしてお祝いムードに
+  ctx.fillStyle = "rgba(4, 2, 14, 0.78)";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.textAlign = "center";
+
+  // 上：お祝いの大見出し（ふんわり光る）
+  ctx.save();
+  ctx.shadowColor = "#7dff9d";
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = "#7dff9d";
+  ctx.font = "bold 34px monospace";
+  ctx.fillText("ゴリラ完全制覇！", WIDTH / 2, 66);
+  ctx.restore();
+  ctx.fillStyle = "#ffd45c";
+  ctx.font = "14px monospace";
+  ctx.fillText("ALL BOSSES DEFEATED", WIDTH / 2, 90);
+
+  // 中央：歴代ボス5体の勢ぞろい（小さく描いて横一列）
+  const lineup: ((cx: number, cy: number, walk: number, enraged?: boolean) => void)[] = [
+    drawGorillaBoss,
+    drawMachineGorillaBoss,
+    drawScubaGorilla,
+    drawSnowGorillaBoss,
+    drawMotherGorillaBoss,
+  ];
+  const rowY = 200;
+  const scale = 0.42;
+  for (let i = 0; i < lineup.length; i++) {
+    const x = WIDTH * ((i + 0.5) / lineup.length);
+    // 一体ずつ少し時間差でぴょこぴょこ（お祝いで体を揺らす）
+    const walk = t * 3 + i * 1.2;
+    ctx.save();
+    ctx.translate(x, rowY + Math.sin(t * 2 + i) * 3);
+    ctx.scale(scale, scale);
+    lineup[i](0, 0, walk, false);
+    ctx.restore();
+    // ステージ番号のラベル
+    ctx.fillStyle = "#9fb0c8";
+    ctx.font = "11px monospace";
+    ctx.fillText(`${i + 1}`, x, rowY + 52);
+  }
+
+  // ひとことネタ
+  ctx.fillStyle = "#cfd6e2";
+  ctx.font = "13px monospace";
+  ctx.fillText("…ぜんぶゴリラだった。", WIDTH / 2, 280);
+
+  // 下：スコア
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "20px monospace";
+  ctx.fillText(`SCORE  ${score}`, WIDTH / 2, 340);
+  ctx.font = "16px monospace";
+  ctx.fillText(`HI-SCORE  ${highScore}`, WIDTH / 2, 366);
+  // 残機ぶんの減点があれば理由を表示
+  if (clearLifePenalty > 0) {
+    ctx.fillStyle = "#ff9a9a";
+    ctx.font = "13px monospace";
+    ctx.fillText(`残機減点  -${clearLifePenalty}`, WIDTH / 2, 390);
+  }
+  if (newRecord) {
+    ctx.fillStyle = "#fff36b";
+    ctx.font = "18px monospace";
+    ctx.fillText("NEW RECORD!", WIDTH / 2, 418);
+  }
+  // 点滅する案内
+  if (Math.floor(t * 2) % 2 === 0) {
+    ctx.fillStyle = "#bbbbbb";
+    ctx.font = "14px monospace";
+    ctx.fillText(
+      showTouchControls ? "タップでタイトルへ" : "Z / Space でタイトルへ",
+      WIDTH / 2,
+      HEIGHT - 60,
+    );
+  }
+  ctx.textAlign = "left";
 }
 
 // -------------------------------------------------------------------

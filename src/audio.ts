@@ -181,6 +181,13 @@ const BOSS4_LEAD = [83, 0, 81, 83, 86, 0, 83, 0, 81, 0, 78, 81, 83, 0, 81, 0];
 const BOSS3_BASS = [36, 48, 36, 48, 41, 53, 41, 53, 40, 52, 40, 52, 43, 55, 43, 55];
 const BOSS3_LEAD = [72, 74, 76, 0, 79, 0, 76, 0, 71, 72, 74, 0, 67, 0, 0, 0];
 
+// 通常BGM（ステージ5・宇宙）：神秘的で緊張感のある浮遊感（ハ短調・ゆったり漂う）
+const NORMAL5_BASS = [36, 0, 43, 0, 39, 0, 46, 0, 41, 0, 48, 0, 43, 0, 38, 0];
+const NORMAL5_LEAD = [72, 0, 75, 0, 79, 0, 75, 0, 77, 0, 80, 0, 79, 0, 75, 0];
+// ボス戦BGM（ステージ5・最終決戦）：壮大で勇ましい（ハ短調の力強い進行・速め）
+const BOSS5_BASS = [36, 36, 48, 36, 41, 41, 53, 41, 39, 39, 51, 39, 43, 43, 55, 43];
+const BOSS5_LEAD = [72, 75, 79, 0, 80, 0, 79, 75, 77, 80, 84, 0, 82, 79, 75, 0];
+
 // 各曲の設定（楽譜・ベースの波形・メロディの波形・1ステップの長さ）。
 // leadWave 省略時は square（従来どおり）。triangle にすると柔らかい音色になる。
 // ステップが短い＝速い曲
@@ -206,6 +213,10 @@ const TRACKS = {
   normal4: { bass: NORMAL4_BASS, lead: NORMAL4_LEAD, bassWave: "triangle", stepDur: 0.2, leadWave: "triangle" },
   // ステージ4：勇ましく冷たいボス戦（brassy な sawtooth・速め）
   boss4: { bass: BOSS4_BASS, lead: BOSS4_LEAD, bassWave: "sawtooth", stepDur: 0.15, leadWave: "sawtooth" },
+  // ステージ5：宇宙の道中（神秘的で浮遊感のある triangle・ゆったり漂う）
+  normal5: { bass: NORMAL5_BASS, lead: NORMAL5_LEAD, bassWave: "triangle", stepDur: 0.22, leadWave: "triangle" },
+  // ステージ5：最終決戦（壮大で勇ましい sawtooth・速め。中ボスでも流用）
+  boss5: { bass: BOSS5_BASS, lead: BOSS5_LEAD, bassWave: "sawtooth", stepDur: 0.14, leadWave: "sawtooth" },
 } satisfies Record<string, TrackDef>;
 
 const MUSIC_VOL = 0.35; // BGM全体の音量（効果音より控えめに）

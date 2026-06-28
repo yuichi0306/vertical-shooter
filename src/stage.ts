@@ -26,6 +26,11 @@
 //   "penguin"    … ペンギン（ステージ4）。蛇と同じ動き（横にゆれながら雪玉を撃つ）
 //   "shirokuma"  … シロクマ（ステージ4）。鷲と同じ動き（ふらふら動いて撃つ）・硬め
 //   "yukidaruma" … 雪だるま（ステージ4）。ゆっくり下りつつ、たまに自機へ弾を撃つ
+//   "ufo"        … UFO（ステージ5）。シロクマと同じ動き（ふらふら動いて撃つ）・硬め（3発）
+//   "meteor"     … 隕石（ステージ5）。マグロと同じ動き（まっすぐ速く落ちる）
+//   "alien"      … エイリアン（ステージ5）。蛇と同じ動き（くねりながら撃つ）
+//   "satellite"  … 衛星ロボ（ステージ5）。雪だるまと同じ動き。倒すと爆発（雪だるまの2倍範囲）
+//   "minionGorilla" … 小型メカゴリラ（ステージ5・お供）。ラスボスが戦闘中に射出する小さい敵
 export type EnemyKind =
   | "snail"
   | "snake"
@@ -39,21 +44,35 @@ export type EnemyKind =
   | "tsurara"
   | "penguin"
   | "shirokuma"
-  | "yukidaruma";
+  | "yukidaruma"
+  | "ufo"
+  | "meteor"
+  | "alien"
+  | "satellite"
+  | "minionGorilla";
 
 // ボスの種類
 //   "gorilla"        … ゴリラ（ステージ1）。腕足が動く
 //   "machineGorilla" … 機械のゴリラ（ステージ2）。攻撃が多彩で硬い
 //   "scubaGorilla"   … 酸素ボンベのゴリラ（ステージ3）。機械ゴリラの動き＋たまに突進
 //   "snowGorilla"    … 白いモコモコのスノーゴリラ（ステージ4）。突進＋つらら降らし
-export type BossKind = "gorilla" | "machineGorilla" | "scubaGorilla" | "snowGorilla";
+//   "spaceChimp"     … 宇宙チンパンジー（ステージ5の中ボス）。ボスの仕組みを流用した小さめボス
+//   "motherGorilla"  … メカ母艦ゴリラ（ステージ5のラスボス）。超高HP＋全技＋お供を射出
+export type BossKind =
+  | "gorilla"
+  | "machineGorilla"
+  | "scubaGorilla"
+  | "snowGorilla"
+  | "spaceChimp"
+  | "motherGorilla";
 
 // 背景のテーマ
 //   "night" … 夜空（星・遠い山・暗い島）
 //   "sky"   … 地球の空（水色・白い雲・海・緑の島）
 //   "sea"   … 海の中（青い水・泡・差し込む光・海藻）
 //   "ice"   … 氷の世界（雪原・降る雪・氷山・オーロラ）
-export type StageTheme = "night" | "sky" | "sea" | "ice";
+//   "space" … 宇宙（びっしりの星・星雲・惑星・流れ星）
+export type StageTheme = "night" | "sky" | "sea" | "ice" | "space";
 
 // BGMの種類（実体は audio.ts。ここでは型だけ借りる）
 import type { MusicTrack } from "./audio";
@@ -77,6 +96,8 @@ export type SpawnEvent = {
 //   duration    … 道中の長さ（秒）。これを過ぎ、雑魚を片付けたらボス登場
 //   normalMusic … 道中のBGM、bossMusic … ボス戦のBGM（曲は audio.ts）
 //   timeline    … 敵の出現データ（time の昇順に並べる）
+//   midBoss     … （任意）道中の途中に出る中ボスの種類。倒すまで先に進めない
+//   midBossTime … （任意）中ボスが登場する秒数。雑魚を片付けたこの時刻以降に出現
 export type Stage = {
   name: string;
   theme: StageTheme;
@@ -85,6 +106,8 @@ export type Stage = {
   normalMusic: MusicTrack;
   bossMusic: MusicTrack;
   timeline: SpawnEvent[];
+  midBoss?: BossKind;
+  midBossTime?: number;
 };
 
 // -------------------------------------------------------------------
@@ -327,5 +350,84 @@ const STAGE4: Stage = {
   ],
 };
 
+// -------------------------------------------------------------------
+// ステージ5：宇宙（最終ステージ）。UFO・隕石・エイリアン・衛星ロボ
+//   ＋ 中ボス「宇宙チンパンジー」＋ ラスボス「メカ母艦ゴリラ」
+//   シリーズ最難関。敵は多め・硬め、道中も長め。
+//   ※中ボスは midBossTime（11秒）に登場し、倒すまで先へ進めない。
+// -------------------------------------------------------------------
+const STAGE5: Stage = {
+  name: "FINAL STAGE",
+  theme: "space",
+  boss: "motherGorilla",
+  midBoss: "spaceChimp", // 道中の途中に中ボス（宇宙チンパンジー）
+  midBossTime: 11.0, // この秒数＋雑魚一掃で中ボス登場
+  duration: 23.0,
+  normalMusic: "normal5", // 神秘的で緊張感のある宇宙の道中曲
+  bossMusic: "boss5", // 壮大な最終決戦曲（中ボスでも流用）
+  timeline: [
+    // 序盤：エイリアン（くねって撃つ）で肩慣らし
+    { time: 1.0, kind: "alien", x: 0.3 },
+    { time: 1.0, kind: "alien", x: 0.7 },
+    { time: 2.5, kind: "alien", x: 0.5 },
+
+    // 隕石がまっすぐ速く落ちてくる（鋭い・避けにくい）
+    { time: 3.3, kind: "meteor", x: 0.4 },
+    { time: 3.6, kind: "meteor", x: 0.6 },
+    // 早めに「下から」突き上げる隕石を見せる（中央は避ける）
+    { time: 4.2, kind: "meteor", x: 0.2, from: "bottom" },
+    { time: 4.2, kind: "meteor", x: 0.8, from: "bottom" },
+
+    // UFO登場（ふらふら動いて撃つ・硬め＝3発）
+    { time: 5.0, kind: "ufo", x: 0.5 },
+    { time: 6.0, kind: "satellite", x: 0.25 },
+    { time: 6.0, kind: "satellite", x: 0.75 },
+    { time: 7.0, kind: "ufo", x: 0.3 },
+    { time: 7.0, kind: "alien", x: 0.7 },
+
+    // レアな黄金の豚（このステージに1匹だけ。左から飛んでくる）
+    { time: 8.5, kind: "goldpig", x: 0.0 },
+
+    // 中ボス直前：密度を上げる
+    { time: 9.0, kind: "meteor", x: 0.3 },
+    { time: 9.2, kind: "meteor", x: 0.5 },
+    { time: 9.4, kind: "meteor", x: 0.7 },
+    { time: 10.0, kind: "ufo", x: 0.4 },
+    { time: 10.0, kind: "alien", x: 0.6 },
+    // ↑ ここまで片付けると 11.0 秒で中ボス「宇宙チンパンジー」が登場（倒すまで足止め）
+
+    // ===== 中ボス撃破後の後半戦 =====
+    // お助けキャラ「エンジェル」（右から登場。触れると残機+1）
+    { time: 12.0, kind: "angel", x: 1.0 },
+
+    { time: 12.5, kind: "ufo", x: 0.3 },
+    { time: 12.5, kind: "ufo", x: 0.7 },
+    { time: 13.5, kind: "satellite", x: 0.5 },
+    // 下からエイリアンと隕石が突き上げる
+    { time: 14.0, kind: "alien", x: 0.25, from: "bottom" },
+    { time: 14.0, kind: "meteor", x: 0.75, from: "bottom" },
+
+    // 終盤：山場（4種をまぜる）
+    { time: 15.0, kind: "alien", x: 0.2 },
+    { time: 15.3, kind: "ufo", x: 0.5 },
+    { time: 15.6, kind: "alien", x: 0.8 },
+    { time: 16.2, kind: "meteor", x: 0.3 },
+    { time: 16.4, kind: "meteor", x: 0.7 },
+    { time: 17.0, kind: "satellite", x: 0.35 },
+    { time: 17.0, kind: "satellite", x: 0.65 },
+    { time: 18.0, kind: "ufo", x: 0.25 },
+    { time: 18.0, kind: "ufo", x: 0.75 },
+    { time: 18.5, kind: "meteor", x: 0.5, from: "bottom" },
+    { time: 19.0, kind: "alien", x: 0.4 },
+    { time: 19.0, kind: "alien", x: 0.6 },
+    { time: 19.8, kind: "meteor", x: 0.2 },
+    { time: 20.0, kind: "meteor", x: 0.5 },
+    { time: 20.2, kind: "meteor", x: 0.8 },
+    { time: 21.0, kind: "ufo", x: 0.5 },
+    { time: 21.0, kind: "satellite", x: 0.3 },
+    { time: 21.0, kind: "satellite", x: 0.7 },
+  ],
+};
+
 // プレイする順番にステージを並べる（先頭から順に連戦）
-export const STAGES: Stage[] = [STAGE1, STAGE2, STAGE3, STAGE4];
+export const STAGES: Stage[] = [STAGE1, STAGE2, STAGE3, STAGE4, STAGE5];
