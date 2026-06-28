@@ -29,6 +29,11 @@ const keys = new Set<string>();
 
 window.addEventListener("keydown", (e) => {
   initAudio(); // 最初のキー操作で音を有効化（ブラウザの制限対策）
+  // ポーズの切り替え（P / Esc）。長押しの自動連打を防ぐため、押した瞬間だけ反応する
+  if ((e.code === "KeyP" || e.code === "Escape") && !keys.has(e.code)) {
+    if (gameState === "playing") pauseGame();
+    else if (gameState === "paused") resumeGame();
+  }
   keys.add(e.code);
   // 矢印キーやスペースで画面がスクロールしないように
   if (
@@ -67,6 +72,9 @@ const SHOT_R = 44;
 const BOMB_CX = WIDTH - 122; // ボムボタン
 const BOMB_CY = HEIGHT - 118;
 const BOMB_R = 32;
+const PAUSE_CX = WIDTH - 22; // ポーズボタン（右上・スマホ用）
+const PAUSE_CY = 24;
+const PAUSE_R = 15;
 
 // タッチで今どう動かしたいか（-1〜+1）。0なら止まる
 let touchDirX = 0;
@@ -132,9 +140,21 @@ canvas.addEventListener(
     showTouchControls = true;
     for (const t of Array.from(e.changedTouches)) {
       const g = toGame(t.clientX, t.clientY);
+      // ポーズ中：どこを触っても再開
+      if (gameState === "paused") {
+        resumeGame();
+        touchRoles.set(t.identifier, "ui");
+        continue;
+      }
       // タイトル/決着画面では、どこを触ってもタップ＝決定
       if (gameState !== "playing") {
         uiTap = true;
+        touchRoles.set(t.identifier, "ui");
+        continue;
+      }
+      // 右上のポーズボタン
+      if (inCircle(g.x, g.y, PAUSE_CX, PAUSE_CY, PAUSE_R)) {
+        pauseGame();
         touchRoles.set(t.identifier, "ui");
         continue;
       }
@@ -393,7 +413,7 @@ let shakeTime = 0; // 残りの揺れ時間（秒）
 let hitStop = 0; // 残りのヒットストップ時間（秒）。0より大きい間は動きが止まる
 
 // ゲーム全体の状態。
-type GameState = "title" | "playing" | "gameover" | "clear";
+type GameState = "title" | "playing" | "paused" | "gameover" | "clear";
 let gameState: GameState = "title"; // 起動時はタイトル画面から
 let resultLock = 0; // 決着直後、入力を受け付けない時間（秒）
 let titleLock = 0; // タイトルに戻った直後、入力を受け付けない時間（秒）
@@ -4498,7 +4518,8 @@ function drawTouchControls(): void {
 function render(): void {
   // 「あそびかた」リンクはプレイ中だけ隠す（タイトル・決着では表示）
   if (helpLink) {
-    helpLink.style.display = gameState === "playing" ? "none" : "";
+    helpLink.style.display =
+      gameState === "playing" || gameState === "paused" ? "none" : "";
   }
 
   // 背景（夜空 or 地球の空。テーマで切り替わる）
@@ -4549,11 +4570,11 @@ function render(): void {
 
     ctx.font = "12px monospace";
     if (showTouchControls) {
-      ctx.fillText("移動: 左下のパッド", WIDTH / 2, HEIGHT - 52);
+      ctx.fillText("移動: 左下のパッド   一時停止: 右上のボタン", WIDTH / 2, HEIGHT - 52);
       ctx.fillText("ショット・ボム: 右下のボタン", WIDTH / 2, HEIGHT - 34);
     } else {
       ctx.fillText("移動: 矢印/WASD   ショット: Z/Space", WIDTH / 2, HEIGHT - 52);
-      ctx.fillText("ボム（緊急回避）: X / Shift", WIDTH / 2, HEIGHT - 34);
+      ctx.fillText("ボム: X / Shift   一時停止: P / Esc", WIDTH / 2, HEIGHT - 34);
     }
     ctx.textAlign = "left";
     return; // タイトル中はここで描画終了
@@ -4910,7 +4931,7 @@ function render(): void {
 
   // ステージ開始時のバナー（「STAGE 2」など）。ボスがいない間だけ表示。
   // スッと横から滑り込み→少し止まって→スッと抜けていく＋飾りライン。
-  if (stageBanner > 0 && !boss) {
+  if (stageBanner > 0 && !boss && gameState !== "paused") {
     const shown = STAGE_BANNER_TIME - stageBanner; // 表示開始からの経過秒
     let slide = 0;
     let alpha = 1;
@@ -5022,6 +5043,46 @@ function render(): void {
   // スマホ用の操作ボタン（プレイ中だけ・タッチ端末で表示）
   if (showTouchControls && gameState === "playing") {
     drawTouchControls();
+    // 右上のポーズボタン（一時停止アイコン＝縦2本線）
+    ctx.save();
+    ctx.fillStyle = "rgba(8, 12, 24, 0.55)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(PAUSE_CX, PAUSE_CY, PAUSE_R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#e8eefc";
+    ctx.fillRect(PAUSE_CX - 5, PAUSE_CY - 6, 3.5, 12);
+    ctx.fillRect(PAUSE_CX + 1.5, PAUSE_CY - 6, 3.5, 12);
+    ctx.restore();
+  }
+
+  // ポーズ画面（プレイ中に P / Esc・スマホは右上ボタンで一時停止）
+  if (gameState === "paused") {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    const cx = WIDTH / 2;
+    const cy = HEIGHT / 2;
+    ctx.save();
+    ctx.textAlign = "center";
+    // 大きな一時停止アイコン（縦2本線）
+    ctx.fillStyle = "#bfe9ff";
+    ctx.fillRect(cx - 26, cy - 86, 16, 46);
+    ctx.fillRect(cx + 10, cy - 86, 16, 46);
+    // 「PAUSE」（水色に光る）
+    ctx.shadowColor = "rgba(120, 200, 255, 0.7)";
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = "#bfe9ff";
+    ctx.font = "bold 36px monospace";
+    ctx.fillText("PAUSE", cx, cy);
+    ctx.shadowBlur = 0;
+    // 再開の案内
+    ctx.fillStyle = "#cfd6e2";
+    ctx.font = "14px monospace";
+    ctx.fillText(showTouchControls ? "タップで再開" : "P / Esc で再開", cx, cy + 34);
+    ctx.restore();
+    ctx.textAlign = "left";
   }
 
   // 決着画面（ゲームオーバー / クリア）
@@ -5170,6 +5231,19 @@ function drawEndingScreen(): void {
 }
 
 // -------------------------------------------------------------------
+// ポーズ（一時停止）／再開。ポーズ中は音楽も止める。
+// -------------------------------------------------------------------
+function pauseGame(): void {
+  gameState = "paused";
+  setMusic(null); // ポーズ中はBGMを止める
+}
+function resumeGame(): void {
+  gameState = "playing";
+  // 再開したら、今の場面に合ったBGMを鳴らし直す（ボス戦中ならボス曲）
+  setMusic(boss ? stage.bossMusic : stage.normalMusic);
+}
+
+// -------------------------------------------------------------------
 // メインループ：固定タイムステップ（accumulator方式）
 // -------------------------------------------------------------------
 let lastTime = performance.now();
@@ -5183,6 +5257,14 @@ function frame(now: number): void {
   // ヒットストップ中はゲームの進行を止め、描画だけ続ける（被弾の「ため」）
   if (hitStop > 0) {
     hitStop -= elapsed;
+    render();
+    requestAnimationFrame(frame);
+    return;
+  }
+
+  // ポーズ中はゲームを進めず、描画だけ続ける（再開時にまとめて進まないよう時間も貯めない）
+  if (gameState === "paused") {
+    accumulator = 0;
     render();
     requestAnimationFrame(frame);
     return;
