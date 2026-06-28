@@ -476,10 +476,11 @@ type Particle = {
   life: number; // 残り寿命（秒）
   maxLife: number; // 寿命の最大値（透明度の計算に使う）
   color: string;
+  size: number; // 火花の大きさ（半径）
 };
 const particles: Particle[] = [];
 
-// 指定位置で破片をまき散らす
+// 指定位置で破片をまき散らす（丸い火花）
 function spawnExplosion(x: number, y: number, color: string, count: number): void {
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
@@ -493,6 +494,7 @@ function spawnExplosion(x: number, y: number, color: string, count: number): voi
       life,
       maxLife: life,
       color,
+      size: 1.6 + Math.random() * 2.6, // 大小ばらつかせる
     });
   }
 }
@@ -501,8 +503,21 @@ function spawnExplosion(x: number, y: number, color: string, count: number): voi
 // 敵の弾（ボスが撃ってくる弾。自機に当たる）
 // -------------------------------------------------------------------
 const EBULLET_RADIUS = 6;
-type EnemyBullet = { x: number; y: number; vx: number; vy: number };
+type EnemyBullet = { x: number; y: number; vx: number; vy: number; color: string };
 const enemyBullets: EnemyBullet[] = [];
+
+// 敵弾の基本色（赤）。ボスが撃つときだけ、その下の色に一時的に切り替える
+const EBULLET_DEFAULT_COLOR = "#ff3838";
+let currentEBulletColor = EBULLET_DEFAULT_COLOR;
+
+// "#rrggbb" を "rgba(r,g,b,a)" に変換（グラデーションの透明度指定に使う）
+function hexToRgba(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
 
 // -------------------------------------------------------------------
 // ボス
@@ -779,6 +794,7 @@ function fireEnemyBullet(x: number, y: number, angle: number): void {
     y,
     vx: Math.cos(angle) * EBULLET_SPEED,
     vy: Math.sin(angle) * EBULLET_SPEED,
+    color: currentEBulletColor,
   });
 }
 
@@ -844,6 +860,17 @@ function bossPatternIcicles(b: Boss): void {
     fireEnemyBullet(x, 8, Math.PI / 2); // 真下へ
   }
 }
+
+// ボスごとに弾の色を変える（見分けやすく・テーマに合わせて）
+//   ステージ1=炎のオレンジ／2=電撃の水色／3=深海の緑／4=氷の白青／中ボス=紫／ラスボス=金
+const BOSS_BULLET_COLOR: Record<BossKind, string> = {
+  gorilla: "#ff7a2f",
+  machineGorilla: "#46c8ff",
+  scubaGorilla: "#3bffc4",
+  snowGorilla: "#bfe8ff",
+  spaceChimp: "#b06bff",
+  motherGorilla: "#ffcf3b",
+};
 
 // ボスごとの設定（体力・動き・攻撃の激しさ・使う技の一覧）
 type BossConfig = {
@@ -1666,10 +1693,13 @@ function update(dt: number): void {
 
       boss.fireTimer -= dt;
       if (boss.fireTimer <= 0) {
+        // このボスの色で弾を撃つ（撃ち終わったら通常の赤に戻す）
+        currentEBulletColor = BOSS_BULLET_COLOR[boss.kind];
         cfg.patterns[boss.patternIndex](boss);
         boss.patternIndex = (boss.patternIndex + 1) % cfg.patterns.length;
         // 怒り時は、通常の技に加えて自機を狙う弾も撃つ
         if (boss.enraged) bossPatternAimed(boss);
+        currentEBulletColor = EBULLET_DEFAULT_COLOR;
         boss.fireTimer = fireInterval;
       }
       } // 通常行動（突進していないとき）の終わり
@@ -4537,20 +4567,58 @@ function render(): void {
     }
   }
 
-  // 敵の弾（赤いまる）
-  ctx.fillStyle = "#ff4d4d";
+  // 敵の弾（光る危険な弾：色つきオーラ＋白い芯＋ゆっくり脈打つ）
+  //   色は弾ごとに持っている（ふつうの敵＝赤／ボス＝ボスごとの色）
+  ctx.save();
+  const ebTime = performance.now() / 1000;
   for (const eb of enemyBullets) {
+    // ゆっくり脈打たせて「生きている弾」感を出す（位置ごとに位相をずらす）
+    const pulse = 0.85 + 0.15 * Math.sin(ebTime * 9 + eb.x * 0.3);
+    const r = EBULLET_RADIUS * pulse;
+    // 外側：ふんわり広がる色つきのグロー
+    const grad = ctx.createRadialGradient(eb.x, eb.y, 0, eb.x, eb.y, r * 2.2);
+    grad.addColorStop(0, hexToRgba(eb.color, 0.9));
+    grad.addColorStop(0.5, hexToRgba(eb.color, 0.45));
+    grad.addColorStop(1, hexToRgba(eb.color, 0));
+    ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(eb.x, eb.y, EBULLET_RADIUS, 0, Math.PI * 2);
+    ctx.arc(eb.x, eb.y, r * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    // 本体：弾の色そのもの
+    ctx.fillStyle = eb.color;
+    ctx.beginPath();
+    ctx.arc(eb.x, eb.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    // 芯：白く光る中心（少し上にずらしてツヤを表現）
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(eb.x - r * 0.25, eb.y - r * 0.25, r * 0.45, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore();
 
-  // 爆発の破片（寿命に応じてだんだん透明に）
+  // 爆発の破片（丸い火花：寿命とともに縮んで薄くなる＋ふんわり発光）
+  ctx.save();
   for (const p of particles) {
-    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+    const t = Math.max(0, p.life / p.maxLife); // 1 → 0
+    const r = p.size * (0.4 + 0.6 * t); // 消えるにつれ小さく
+    ctx.globalAlpha = t;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 8 * t;
     ctx.fillStyle = p.color;
-    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    // 生まれたては中心が白く熱い
+    if (t > 0.5) {
+      ctx.globalAlpha = (t - 0.5) * 2;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
+  ctx.restore();
   ctx.globalAlpha = 1; // 透明度を元に戻す
 
   // 自機のショット（光るエネルギー弾：黄色いオーラ＋白い芯）
