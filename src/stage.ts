@@ -362,7 +362,7 @@ const STAGE5: Stage = {
   boss: "motherGorilla",
   midBoss: "spaceChimp", // 道中の途中に中ボス（宇宙チンパンジー）
   midBossTime: 11.0, // この秒数＋雑魚一掃で中ボス登場
-  duration: 23.0,
+  duration: 33.0, // 中ボス撃破後もたっぷり戦ってからラスボス（約10秒延長）
   normalMusic: "normal5", // 神秘的で緊張感のある宇宙の道中曲
   bossMusic: "boss5", // 壮大な最終決戦曲（中ボスでも流用）
   timeline: [
@@ -426,6 +426,31 @@ const STAGE5: Stage = {
     { time: 21.0, kind: "ufo", x: 0.5 },
     { time: 21.0, kind: "satellite", x: 0.3 },
     { time: 21.0, kind: "satellite", x: 0.7 },
+
+    // 中ボス撃破後をたっぷり戦わせる第2の山場（ラスボス出現まで＋約10秒）
+    { time: 22.5, kind: "alien", x: 0.3 },
+    { time: 22.5, kind: "alien", x: 0.7 },
+    { time: 23.5, kind: "meteor", x: 0.25 },
+    { time: 23.7, kind: "meteor", x: 0.55 },
+    { time: 23.9, kind: "meteor", x: 0.85 },
+    { time: 24.5, kind: "ufo", x: 0.4 },
+    { time: 24.5, kind: "ufo", x: 0.6 },
+    { time: 25.5, kind: "alien", x: 0.2, from: "bottom" },
+    { time: 25.5, kind: "alien", x: 0.8, from: "bottom" },
+    { time: 26.0, kind: "satellite", x: 0.5 },
+    { time: 26.8, kind: "meteor", x: 0.35 },
+    { time: 27.0, kind: "meteor", x: 0.65 },
+    { time: 27.5, kind: "ufo", x: 0.3 },
+    { time: 27.5, kind: "alien", x: 0.7 },
+    { time: 28.2, kind: "meteor", x: 0.5, from: "bottom" },
+    { time: 28.8, kind: "satellite", x: 0.3 },
+    { time: 28.8, kind: "satellite", x: 0.7 },
+    { time: 29.5, kind: "ufo", x: 0.5 },
+    { time: 30.0, kind: "meteor", x: 0.2 },
+    { time: 30.2, kind: "meteor", x: 0.5 },
+    { time: 30.4, kind: "meteor", x: 0.8 },
+    { time: 31.0, kind: "alien", x: 0.35 },
+    { time: 31.0, kind: "alien", x: 0.65 },
   ],
 };
 
