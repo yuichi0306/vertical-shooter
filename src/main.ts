@@ -4598,18 +4598,27 @@ function render(): void {
   // 背景（夜空 or 地球の空。テーマで切り替わる）
   drawBackground();
 
-  // タイトル画面（流れる星の上にタイトルだけ表示）
+  // タイトル画面（流れる星の上に、ゴリラのマスコット＋タイトル＋自機）
   if (gameState === "title") {
+    const tnow = performance.now() / 1000;
+
     // タイトル文字の裏をうっすら暗くする（背景の島や雲に負けず読めるように）
-    const vcy = HEIGHT / 2 - 50;
+    const vcy = HEIGHT / 2 - 30;
     const vignette = ctx.createRadialGradient(
       WIDTH / 2, vcy, 20,
-      WIDTH / 2, vcy, 340
+      WIDTH / 2, vcy, 360
     );
-    vignette.addColorStop(0, "rgba(0, 0, 0, 0.55)");
+    vignette.addColorStop(0, "rgba(0, 0, 0, 0.6)");
     vignette.addColorStop(1, "rgba(0, 0, 0, 0)");
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+    // マスコット：大きなゴリラがのっしのっしと待ち構える（歩き＋上下に揺れる）
+    ctx.save();
+    ctx.translate(WIDTH / 2, 150 + Math.sin(tnow * 2) * 5);
+    ctx.scale(1.7, 1.7);
+    drawGorillaBoss(0, 0, tnow * 5, false);
+    ctx.restore();
 
     ctx.textAlign = "center";
     // タイトル本体（緑のほんのり光るグロー付き）
@@ -4621,8 +4630,8 @@ function render(): void {
     // 末尾の句読点（「、」「。」）は字面が左下に寄っていて右に余白ができる。
     // そのぶん右へ少しずらして「見た目の中央」に揃える
     const punctNudge = ctx.measureText("。").width * 0.3;
-    ctx.fillText("ゴリラ、", WIDTH / 2 + punctNudge, HEIGHT / 2 - 70);
-    ctx.fillText("また来た。", WIDTH / 2 + punctNudge, HEIGHT / 2 - 24);
+    ctx.fillText("ゴリラ、", WIDTH / 2 + punctNudge, HEIGHT / 2 - 66);
+    ctx.fillText("また来た。", WIDTH / 2 + punctNudge, HEIGHT / 2 - 20);
     ctx.restore();
 
     ctx.fillStyle = "#ffffff";
@@ -4637,11 +4646,19 @@ function render(): void {
     ctx.fillText(
       showTouchControls ? "タップでスタート" : "Z / Space でスタート",
       WIDTH / 2,
-      HEIGHT / 2 + 60
+      HEIGHT / 2 + 68
     );
     ctx.restore();
 
+    // 自機（キリン亀）がゴリラを見上げて待機。ゆらゆら首を振る
+    ctx.save();
+    ctx.translate(WIDTH / 2, HEIGHT - 104 + Math.sin(tnow * 3) * 2);
+    ctx.scale(1.25, 1.25);
+    drawPlayerGiraffeTurtle(0, 0, Math.sin(tnow * 1.5) * 0.5);
+    ctx.restore();
+
     ctx.font = "12px monospace";
+    ctx.fillStyle = "#ffffff";
     if (showTouchControls) {
       ctx.fillText("移動: 左下のパッド   一時停止: 右上のボタン", WIDTH / 2, HEIGHT - 52);
       ctx.fillText("ショット・ボム: 右下のボタン", WIDTH / 2, HEIGHT - 34);
