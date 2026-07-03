@@ -412,6 +412,11 @@ const HITSTOP_TIME = 0.07; // 被弾の瞬間、動きを止める時間（秒�
 let shakeTime = 0; // 残りの揺れ時間（秒）
 let hitStop = 0; // 残りのヒットストップ時間（秒）。0より大きい間は動きが止まる
 
+// ボス撃破の大演出（画面フラッシュ）
+const BOSS_DEFEAT_FLASH_TIME = 0.5; // 撃破フラッシュの表示時間（秒）
+let bossDefeatFlash = 0; // 0より大きい間、画面が白くフラッシュする
+let bossDefeatColor = "#ffffff"; // フラッシュのふち色（倒したボスの色）
+
 // ゲーム全体の状態。
 type GameState = "title" | "playing" | "paused" | "gameover" | "clear";
 let gameState: GameState = "title"; // 起動時はタイトル画面から
@@ -517,6 +522,21 @@ function spawnExplosion(x: number, y: number, color: string, count: number): voi
       size: 1.6 + Math.random() * 2.6, // 大小ばらつかせる
     });
   }
+}
+
+// -------------------------------------------------------------------
+// 自機のエンジン噴射（後ろに残る光の軌跡）
+// -------------------------------------------------------------------
+type Trail = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; size: number };
+const trails: Trail[] = [];
+
+// テーマごとの噴射の色（白い芯＋この色のオーラ）
+function exhaustColor(): string {
+  return theme === "night" ? "#7dffb0"
+    : theme === "sky" ? "#bfe8ff"
+    : theme === "sea" ? "#8dffe0"
+    : theme === "ice" ? "#d8f0ff"
+    : "#c9a8ff"; // space
 }
 
 // -------------------------------------------------------------------
@@ -1198,7 +1218,24 @@ function defeatBoss(): void {
             : boss.kind === "motherGorilla"
               ? "#9fb4ff"
               : "#b15cff";
-  spawnExplosion(boss.x, boss.y, color, 70); // 大きな爆発
+  const bx = boss.x;
+  const by = boss.y;
+  // 破片を中心＋周囲に何度もまき散らす（大量）
+  spawnExplosion(bx, by, "#ffffff", 34); // 白い閃光の破片
+  spawnExplosion(bx, by, color, 60);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    spawnExplosion(bx + Math.cos(a) * 26, by + Math.sin(a) * 26, color, 16);
+  }
+  // 三重の衝撃波リング（大・中・小）
+  spawnRing(bx, by, "#ffffff", 210);
+  spawnRing(bx, by, color, 150);
+  spawnRing(bx, by, color, 95);
+  // 画面フラッシュ＋大きめの揺れ＋一瞬のため（インパクト）
+  bossDefeatFlash = BOSS_DEFEAT_FLASH_TIME;
+  bossDefeatColor = color;
+  shakeTime = SHAKE_TIME * 1.6;
+  hitStop = 0.16;
   playBossExplosion();
   const wasMid = boss.isMid;
   boss = null;
@@ -1255,6 +1292,7 @@ function resetGame(): void {
   optionTurtle.active = false; // お供の小亀はリセット（5段階で再び出現）
   player.bombs = START_BOMBS;
   bombFlash = 0;
+  bossDefeatFlash = 0;
   bombKeyWasDown = false;
   shakeTime = 0;
   hitStop = 0;
@@ -1263,6 +1301,7 @@ function resetGame(): void {
   items.length = 0;
   enemyBullets.length = 0;
   particles.length = 0;
+  trails.length = 0;
   floatTexts.length = 0;
   rings.length = 0;
   boss = null;
@@ -1332,6 +1371,7 @@ function update(dt: number): void {
 
   // ボムの閃光・画面の揺れを時間で弱めていく（どの状態でも進める）
   if (bombFlash > 0) bombFlash -= dt;
+  if (bossDefeatFlash > 0) bossDefeatFlash -= dt;
   if (shakeTime > 0) shakeTime -= dt;
 
   // --- 爆発の破片（どの状態でも動かし続ける）---
@@ -1343,6 +1383,16 @@ function update(dt: number): void {
     p.vy *= 0.96;
     p.life -= dt;
     if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // --- エンジン噴射の粒：流れながら消える ---
+  for (let i = trails.length - 1; i >= 0; i--) {
+    const tr = trails[i];
+    tr.x += tr.vx * dt;
+    tr.y += tr.vy * dt;
+    tr.vx *= 0.94;
+    tr.life -= dt;
+    if (tr.life <= 0) trails.splice(i, 1);
   }
 
   // --- 浮かぶ文字（「+100」など）：ゆっくり上へ昇って消える ---
@@ -1429,6 +1479,22 @@ function update(dt: number): void {
   // 画面の外に出ないように位置を制限する
   player.x = Math.max(PLAYER_RADIUS, Math.min(WIDTH - PLAYER_RADIUS, player.x));
   player.y = Math.max(PLAYER_RADIUS, Math.min(HEIGHT - PLAYER_RADIUS, player.y));
+
+  // --- エンジン噴射：自機の後ろ（下）から光の粒を出す。動くと勢いが増す ---
+  const moving = dx !== 0 || dy !== 0;
+  const rearY = player.y + PLAYER_RADIUS * 0.7;
+  const puffs = moving ? 2 : 1;
+  for (let i = 0; i < puffs; i++) {
+    trails.push({
+      x: player.x + (Math.random() * 6 - 3),
+      y: rearY,
+      vx: (Math.random() * 2 - 1) * 16 - dx * 22, // 移動と逆向きに少し流す
+      vy: (moving ? 70 : 40) + Math.random() * 45, // 下へ流れる
+      life: moving ? 0.32 : 0.22,
+      maxLife: moving ? 0.32 : 0.22,
+      size: (moving ? 3.2 : 2.2) + Math.random() * 1.8,
+    });
+  }
 
   // --- お供の小亀（5段階目）：自機の定位置へなめらかについてくる ---
   if (player.power >= 5) {
@@ -4813,6 +4879,31 @@ function render(): void {
   }
   ctx.restore();
 
+  // エンジン噴射の光の軌跡（自機より奥に描く）
+  if (gameState !== "gameover") {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter"; // 光が重なって明るくなる
+    const ex = exhaustColor();
+    for (const tr of trails) {
+      const t = Math.max(0, tr.life / tr.maxLife); // 1 → 0
+      const r = tr.size * (0.5 + 0.5 * t);
+      // 外側：テーマ色のオーラ
+      ctx.globalAlpha = t * 0.5;
+      ctx.fillStyle = ex;
+      ctx.beginPath();
+      ctx.arc(tr.x, tr.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      // 芯：白く明るい中心
+      ctx.globalAlpha = t * 0.8;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(tr.x, tr.y, r * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
   // 自機（頭がキリン・体が亀のふしぎな生きもの。上＝進行方向）。
   // 無敵中だけ点滅させ、それ以外は常に表示。ゲームオーバー中は描かない。
   const blinkVisible =
@@ -4839,6 +4930,23 @@ function render(): void {
     ctx.beginPath();
     ctx.arc(player.x, player.y, (1 - t) * Math.max(WIDTH, HEIGHT), 0, Math.PI * 2);
     ctx.stroke();
+    ctx.restore();
+  }
+
+  // ボス撃破の画面フラッシュ（パッと白く光ってスッと消える）
+  if (bossDefeatFlash > 0) {
+    const t = bossDefeatFlash / BOSS_DEFEAT_FLASH_TIME; // 1 → 0 へ
+    ctx.save();
+    // 中央（ボスがいた上のほう）ほど強く光る白いフラッシュ
+    const fg = ctx.createRadialGradient(
+      WIDTH / 2, HEIGHT * 0.32, 20,
+      WIDTH / 2, HEIGHT * 0.32, Math.max(WIDTH, HEIGHT)
+    );
+    fg.addColorStop(0, hexToRgba("#ffffff", t * 0.85));
+    fg.addColorStop(0.4, hexToRgba(bossDefeatColor, t * 0.35));
+    fg.addColorStop(1, hexToRgba(bossDefeatColor, 0));
+    ctx.fillStyle = fg;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
     ctx.restore();
   }
 
