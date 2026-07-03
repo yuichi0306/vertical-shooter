@@ -1173,6 +1173,13 @@ function useBomb(): void {
   bombFlash = BOMB_FLASH_TIME;
   player.invincible = Math.max(player.invincible, BOMB_INVINCIBLE_TIME);
   playBomb();
+  // ド派手な発動演出：三重の衝撃波リング＋自機まわりのキラキラ＋画面揺れ
+  spawnRing(player.x, player.y, "#ffffff", Math.max(WIDTH, HEIGHT));
+  spawnRing(player.x, player.y, "#8bd8ff", Math.max(WIDTH, HEIGHT) * 0.72);
+  spawnRing(player.x, player.y, "#bfe9ff", Math.max(WIDTH, HEIGHT) * 0.46);
+  spawnExplosion(player.x, player.y, "#bfe9ff", 28);
+  spawnExplosion(player.x, player.y, "#ffffff", 14);
+  shakeTime = SHAKE_TIME;
 
   // 画面内の雑魚を全部倒す（爆発と得点つき。アイテムは出ない）
   // ※エンジェル（お助けキャラ）は巻き込まず残す
@@ -4917,20 +4924,29 @@ function render(): void {
     drawMiniTurtle(optionTurtle.x, optionTurtle.y);
   }
 
-  // ボムの閃光（画面全体が白く光り、衝撃波の輪が広がる）
+  // ボムの閃光（自機を中心に水色〜白がまぶしく光る＋太い衝撃波の輪）
   if (bombFlash > 0) {
     const t = bombFlash / BOMB_FLASH_TIME; // 1 → 0 へ
     ctx.save();
-    ctx.globalAlpha = t * 0.5;
-    ctx.fillStyle = "#ffffff";
+    // 自機を中心にした、まぶしい放射状フラッシュ（白い芯→水色→透明）
+    const fg = ctx.createRadialGradient(
+      player.x, player.y, 10,
+      player.x, player.y, Math.max(WIDTH, HEIGHT)
+    );
+    fg.addColorStop(0, hexToRgba("#ffffff", t * 0.9));
+    fg.addColorStop(0.35, hexToRgba("#bfe9ff", t * 0.5));
+    fg.addColorStop(1, hexToRgba("#8bd8ff", 0));
+    ctx.fillStyle = fg;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    // 太い主リング（勢いよく外へ広がる）
     ctx.globalAlpha = t;
-    ctx.strokeStyle = "#bfe9ff";
-    ctx.lineWidth = 6;
+    ctx.strokeStyle = "#e8f7ff";
+    ctx.lineWidth = 8 * t + 2;
     ctx.beginPath();
     ctx.arc(player.x, player.y, (1 - t) * Math.max(WIDTH, HEIGHT), 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   // ボス撃破の画面フラッシュ（パッと白く光ってスッと消える）
