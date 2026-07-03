@@ -3884,10 +3884,22 @@ function drawSnowGorillaBoss(cx: number, cy: number, walk: number, enraged = fal
 
 // 遠い山（暗い青のなだらかな影）
 function drawHill(d: Deco): void {
-  ctx.fillStyle = "#161f38";
+  const rx = 58 * d.scale;
+  const ry = 26 * d.scale;
+  // 上が少し明るく、下が暗い縦グラデで丸みを出す
+  const g = ctx.createLinearGradient(d.x, d.y - ry, d.x, d.y + ry);
+  g.addColorStop(0, "#202c4c");
+  g.addColorStop(1, "#111930");
+  ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.ellipse(d.x, d.y, 58 * d.scale, 26 * d.scale, 0, 0, Math.PI * 2);
+  ctx.ellipse(d.x, d.y, rx, ry, 0, 0, Math.PI * 2);
   ctx.fill();
+  // 稜線のうっすらしたハイライト
+  ctx.strokeStyle = "rgba(150, 170, 230, 0.12)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y, rx * 0.92, ry * 0.92, 0, Math.PI * 1.15, Math.PI * 1.85);
+  ctx.stroke();
 }
 
 // 流れる雲（ふわっとした半透明のかたまり）
@@ -3910,14 +3922,23 @@ function drawCloud(d: Deco): void {
 // 近い地面（夜の島。青グレーで「奥の飾り」に下げ、緑の敵・アイテムと色がぶつからないように）
 function drawGround(d: Deco): void {
   const s = d.scale;
+  const rx = 50 * s;
+  const ry = 30 * s;
   ctx.save();
   ctx.globalAlpha = 0.6; // 少し薄くして背景に沈める
-  ctx.fillStyle = "#141b2e"; // 緑→青グレー
+  // 上が明るい縦グラデで、平たいオーバル→丸い島に
+  const g = ctx.createLinearGradient(d.x, d.y - ry, d.x, d.y + ry);
+  g.addColorStop(0, "#1c2740");
+  g.addColorStop(1, "#0e1424");
+  ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.ellipse(d.x, d.y, 50 * s, 30 * s, 0, 0, Math.PI * 2);
+  ctx.ellipse(d.x, d.y, rx, ry, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "rgba(120, 140, 190, 0.16)"; // ふちも青系に
+  // 上側のふちにやわらかいハイライト（月明かりが当たる感じ）
+  ctx.strokeStyle = "rgba(130, 150, 200, 0.20)";
   ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y, rx, ry, 0, Math.PI * 1.1, Math.PI * 1.9);
   ctx.stroke();
   ctx.restore();
 }
@@ -3941,8 +3962,14 @@ function drawIsland(d: Deco): void {
   ctx.beginPath();
   ctx.ellipse(d.x, d.y, 44 * s, 30 * s, 0, 0, Math.PI * 2);
   ctx.fill();
-  // 緑の陸地（内側）
-  ctx.fillStyle = "#4e9e4e";
+  // 緑の陸地（ドーム状のグラデで、平たい円→丸い島に）
+  const g = ctx.createRadialGradient(
+    d.x - 8 * s, d.y - 8 * s, 3 * s,
+    d.x, d.y, 36 * s
+  );
+  g.addColorStop(0, "#63bd63");
+  g.addColorStop(1, "#3c7d3c");
+  ctx.fillStyle = g;
   ctx.beginPath();
   ctx.ellipse(d.x, d.y, 36 * s, 23 * s, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -4445,11 +4472,23 @@ function drawAurora(): void {
 // 氷の世界：奥に並ぶ氷山のシルエット（青白い三角）
 function drawIceberg(d: Deco): void {
   const s = d.scale;
-  ctx.fillStyle = "rgba(225, 240, 252, 0.7)";
+  // 本体：上が明るく下が青い縦グラデ
+  const g = ctx.createLinearGradient(d.x, d.y - 26 * s, d.x, d.y + 20 * s);
+  g.addColorStop(0, "rgba(240, 250, 255, 0.82)");
+  g.addColorStop(1, "rgba(178, 208, 234, 0.62)");
+  ctx.fillStyle = g;
   ctx.beginPath();
   ctx.moveTo(d.x - 46 * s, d.y + 20 * s);
   ctx.lineTo(d.x, d.y - 26 * s);
   ctx.lineTo(d.x + 46 * s, d.y + 20 * s);
+  ctx.closePath();
+  ctx.fill();
+  // 右側の影の面（立体感を出す）
+  ctx.fillStyle = "rgba(150, 180, 212, 0.35)";
+  ctx.beginPath();
+  ctx.moveTo(d.x, d.y - 26 * s);
+  ctx.lineTo(d.x + 46 * s, d.y + 20 * s);
+  ctx.lineTo(d.x + 8 * s, d.y + 20 * s);
   ctx.closePath();
   ctx.fill();
   // 雪をかぶった明るい頂
@@ -4465,9 +4504,22 @@ function drawIceberg(d: Deco): void {
 // 氷の世界：近い雪の丘（手前を流れる白いふくらみ・ひかえめに）
 function drawSnowHill(d: Deco): void {
   const s = d.scale;
-  ctx.fillStyle = "rgba(244, 251, 255, 0.4)";
+  const cx = d.x;
+  const cy = d.y + 34 * s;
+  const rx = 56 * s;
+  const ry = 24 * s;
+  // 上が明るい縦グラデ（雪のふくらみ）
+  const g = ctx.createLinearGradient(cx, cy - ry, cx, cy + ry);
+  g.addColorStop(0, "rgba(255, 255, 255, 0.5)");
+  g.addColorStop(1, "rgba(206, 232, 248, 0.3)");
+  ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.ellipse(d.x, d.y + 34 * s, 56 * s, 24 * s, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // てっぺんのやわらかいハイライト
+  ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+  ctx.beginPath();
+  ctx.ellipse(cx - rx * 0.18, cy - ry * 0.5, rx * 0.5, ry * 0.4, 0, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -4504,10 +4556,22 @@ function drawLightRays(): void {
 // 海の中：奥に沈む岩のシルエット（青グレーで控えめに）
 function drawSeaRock(d: Deco): void {
   const s = d.scale;
-  ctx.fillStyle = "rgba(8, 40, 64, 0.55)";
+  const rx = 50 * s;
+  const ry = 26 * s;
+  // 上が少し明るい縦グラデで、平たい影→丸い岩に
+  const g = ctx.createLinearGradient(d.x, d.y - ry, d.x, d.y + ry);
+  g.addColorStop(0, "rgba(22, 70, 100, 0.6)");
+  g.addColorStop(1, "rgba(4, 26, 44, 0.55)");
+  ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.ellipse(d.x, d.y, 50 * s, 26 * s, 0, 0, Math.PI * 2);
+  ctx.ellipse(d.x, d.y, rx, ry, 0, 0, Math.PI * 2);
   ctx.fill();
+  // 上面のリムライト（水面からの光が当たる感じ）
+  ctx.strokeStyle = "rgba(150, 220, 255, 0.14)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y, rx * 0.95, ry * 0.95, 0, Math.PI * 1.15, Math.PI * 1.85);
+  ctx.stroke();
 }
 
 // 海の中：立ちのぼる泡（1粒）
