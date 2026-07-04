@@ -19,6 +19,25 @@ const STEP = 1 / FPS; // 1回の更新が進める時間（秒）
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 
+// -------------------------------------------------------------------
+// Retina対応：画面の実ピクセル密度（devicePixelRatio）に合わせて、
+// キャンバスの内部解像度を「実際に表示されている大きさ」まで上げる。
+// 座標はこれまでどおり 480x640 のまま書き、render() の最初に拡大率を
+// かけて描く。高精細画面でのにじみ・ガタつきがなくなる。
+// -------------------------------------------------------------------
+function resizeCanvasForScreen(): void {
+  const rect = canvas.getBoundingClientRect(); // 画面上での表示サイズ
+  const dpr = Math.min(window.devicePixelRatio || 1, 3); // ピクセル密度（念のため上限3）
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+}
+resizeCanvasForScreen();
+window.addEventListener("resize", resizeCanvasForScreen);
+
 // 右上の「あそびかた」リンク（プレイ中は隠す）
 const helpLink = document.getElementById("help-link") as HTMLElement | null;
 
@@ -556,6 +575,9 @@ const OPTION_FOLLOW = 9; // 追従のなめらかさ（大きいほど速く追�
 const LASER_SPEED = 760; // レーザーが上へ進む速さ（px/秒）。通常弾より速い
 const optionTurtle = { x: player.x, y: player.y, active: false };
 const ITEM_DROP_RATE = 0.12; // 敵撃破時にアイテムが出る確率（0.12 = 12%）
+// 救済（天井）：運が悪くてこの数だけ倒してもキャベツが出なかったら、次は必ず出す
+const CABBAGE_PITY_KILLS = 8;
+let killsSinceCabbage = 0; // キャベツが出てから倒した数（救済の判定用）
 const ITEM_RADIUS = 10; // アイテムの大きさ／当たり判定
 const ITEM_SPEED = 90; // アイテムが下りる速さ（px/秒）
 
@@ -1398,6 +1420,7 @@ function resetGame(startStage = 0): void {
   nextEventIndex = 0;
   scheduleBananas(); // ステージ1のバナナ出現タイミングを決める
   defeated = 0;
+  killsSinceCabbage = 0; // キャベツの救済カウントもリセット
   score = 0;
   clearLifePenalty = 0;
   newRecord = false;
@@ -1765,9 +1788,15 @@ function update(dt: number): void {
           } else {
             score += SCORE_ENEMY;
             spawnExplosion(e.x, e.y, ENEMY_EXPLOSION_COLOR[e.kind], 14);
-            // 一定確率でパワーアップアイテムを落とす
-            if (Math.random() < ITEM_DROP_RATE) {
+            // 一定確率でパワーアップアイテムを落とす。
+            // 救済（天井）：CABBAGE_PITY_KILLS 体続けて出なかったら必ず出す
+            killsSinceCabbage += 1;
+            if (
+              Math.random() < ITEM_DROP_RATE ||
+              killsSinceCabbage >= CABBAGE_PITY_KILLS
+            ) {
               items.push({ x: e.x, y: e.y, kind: "power" });
+              killsSinceCabbage = 0;
             }
           }
           playExplosion();
@@ -3979,23 +4008,24 @@ function drawSnowGorillaBoss(cx: number, cy: number, walk: number, enraged = fal
 }
 
 // 遠い山（暗い青のなだらかな影）
-function drawHill(d: Deco): void {
-  const rx = 58 * d.scale;
-  const ry = 26 * d.scale;
+// 遠い山の「形」（中心(0,0)・等倍）。ぼかしスプライトの焼き込み用
+function drawHillShape(c: CanvasRenderingContext2D): void {
+  const rx = 58;
+  const ry = 26;
   // 上が少し明るく、下が暗い縦グラデで丸みを出す
-  const g = ctx.createLinearGradient(d.x, d.y - ry, d.x, d.y + ry);
+  const g = c.createLinearGradient(0, -ry, 0, ry);
   g.addColorStop(0, "#202c4c");
   g.addColorStop(1, "#111930");
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.ellipse(d.x, d.y, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fill();
+  c.fillStyle = g;
+  c.beginPath();
+  c.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+  c.fill();
   // 稜線のうっすらしたハイライト
-  ctx.strokeStyle = "rgba(150, 170, 230, 0.12)";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.ellipse(d.x, d.y, rx * 0.92, ry * 0.92, 0, Math.PI * 1.15, Math.PI * 1.85);
-  ctx.stroke();
+  c.strokeStyle = "rgba(150, 170, 230, 0.12)";
+  c.lineWidth = 1.5;
+  c.beginPath();
+  c.ellipse(0, 0, rx * 0.92, ry * 0.92, 0, Math.PI * 1.15, Math.PI * 1.85);
+  c.stroke();
 }
 
 // 流れる雲（ふわっとした半透明のかたまり）
@@ -4402,16 +4432,51 @@ function drawMotherGorillaBoss(cx: number, cy: number, walk: number, enraged = f
   ctx.restore();
 }
 
+// -------------------------------------------------------------------
+// ぼかし済みスプライトのキャッシュ。
+//   毎フレーム ctx.filter = "blur()" をかけるのはCanvasで一番重い処理の
+//   ひとつ。そこで最初に1回だけ「ぼかし済みの絵」を別キャンバスに
+//   焼き込んでおき、毎フレームはそれを貼るだけにする（見た目そのまま・負荷激減）。
+// -------------------------------------------------------------------
+type BakedSprite = { img: HTMLCanvasElement; half: number };
+
+// ぼかし済みの絵を1回だけ作る。
+//   half … 絵の中心から端までの距離（ゲームpx）
+//   blur … ぼかしの強さ（px）
+//   draw … 中心(0,0)に等倍で「形」を描く関数
+function bakeBlurredSprite(
+  half: number,
+  blur: number,
+  draw: (c: CanvasRenderingContext2D) => void,
+): BakedSprite {
+  const SS = 2; // 2倍の解像度で焼いておく（Retina画面でもきれいに見える）
+  const pad = blur * 3; // ぼかしがにじみ出るぶんの余白
+  const size = (half + pad) * 2 * SS;
+  const cv = document.createElement("canvas");
+  cv.width = size;
+  cv.height = size;
+  const c = cv.getContext("2d")!;
+  c.translate(size / 2, size / 2);
+  c.scale(SS, SS);
+  c.filter = `blur(${blur}px)`; // 焼き込むときだけぼかしをかける
+  draw(c);
+  return { img: cv, half: half + pad };
+}
+
+// 焼き込んだスプライトを、Deco の位置・大きさに合わせて貼る
+function drawBaked(sp: BakedSprite, d: Deco): void {
+  const half = sp.half * d.scale;
+  ctx.drawImage(sp.img, d.x - half, d.y - half, half * 2, half * 2);
+}
+
 // 背景をテーマに応じて描く（夜空 or 地球の空）
 function drawBackground(): void {
   if (theme === "night") {
     // 夜空：グラデーション → 遠い山 → 星 → 雲 → 近い島
     ctx.fillStyle = skyGradientNight;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
-    // いちばん奥の山は少しぼかして遠近感（被写界深度）を出す
-    ctx.filter = "blur(2px)";
-    for (const d of farHills) drawHill(d);
-    ctx.filter = "none";
+    // いちばん奥の山は「ぼかし済みの絵」を貼って遠近感（被写界深度）を出す
+    for (const d of farHills) drawBaked(hillSprite, d);
     ctx.fillStyle = "#aab4ff";
     for (const s of stars) ctx.fillRect(s.x, s.y, s.size, s.size);
     for (const d of clouds) drawCloud(d);
@@ -4428,9 +4493,8 @@ function drawBackground(): void {
     ctx.fillStyle = skyGradientSea;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     drawLightRays();
-    ctx.filter = "blur(2px)"; // 奥の岩はぼかして遠近感
-    for (const d of farHills) drawSeaRock(d);
-    ctx.filter = "none";
+    // 奥の岩は「ぼかし済みの絵」を貼って遠近感
+    for (const d of farHills) drawBaked(seaRockSprite, d);
     for (const d of bubbles) drawBubble(d);
   } else if (theme === "ice") {
     // 氷の世界：藍→白のグラデーション → オーロラ → 奥の氷山 → 近い雪の丘 → 降る雪
@@ -4439,9 +4503,8 @@ function drawBackground(): void {
     drawAurora();
     ctx.fillStyle = "#dff0fb"; // 遠くの星のかわりに、空のきらめき
     for (const s of stars) ctx.fillRect(s.x, s.y, s.size, s.size);
-    ctx.filter = "blur(2px)"; // 奥の氷山はぼかして遠近感
-    for (const d of farHills) drawIceberg(d);
-    ctx.filter = "none";
+    // 奥の氷山は「ぼかし済みの絵」を貼って遠近感
+    for (const d of farHills) drawBaked(icebergSprite, d);
     for (const d of nearGround) drawSnowHill(d);
     for (const d of snowflakes) drawSnowflake(d);
   } else {
@@ -4457,9 +4520,8 @@ function drawBackground(): void {
       ctx.fillRect(s.x, s.y, s.size, s.size);
     }
     ctx.globalAlpha = 1;
-    ctx.filter = "blur(1px)"; // 奥の惑星は少しぼかして遠近感
-    for (const d of farHills) drawPlanet(d);
-    ctx.filter = "none";
+    // 奥の惑星は「ぼかし済みの絵」を貼って遠近感（色はx座標で3種類から選ぶ）
+    for (const d of farHills) drawBaked(planetSprites[Math.floor(d.x) % 3], d);
     for (const d of clouds) drawComet(d); // 流れ星
   }
 }
@@ -4486,36 +4548,33 @@ function drawNebula(): void {
   ctx.restore();
 }
 
-// 宇宙：奥に浮かぶ惑星（リング付きや模様つき）。Deco の x を種類分けに使う。
-function drawPlanet(d: Deco): void {
-  const r = 14 * d.scale;
-  ctx.save();
-  ctx.translate(d.x, d.y);
-  // 惑星ごとに色を変える（x座標から決める）
+// 宇宙：奥に浮かぶ惑星の「形」（中心(0,0)・等倍）。variant で色・リングが変わる
+function drawPlanetShape(c: CanvasRenderingContext2D, variant: number): void {
+  const r = 14;
+  // 惑星ごとの色（0=茶・1=青・2=黄土でリング付き）
   const palette = [
     ["#c97b4a", "#8a4a26"], // 茶（火星風）
     ["#5aa0c8", "#2f6890"], // 青
     ["#c8a85a", "#8a6f2f"], // 黄土（土星風）
   ];
-  const pi = Math.floor(d.x) % palette.length;
+  const pi = variant % palette.length;
   const [light, dark] = palette[pi];
   // 本体
-  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.2, 0, 0, r);
+  const g = c.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.2, 0, 0, r);
   g.addColorStop(0, light);
   g.addColorStop(1, dark);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(0, 0, r, 0, Math.PI * 2);
-  ctx.fill();
+  c.fillStyle = g;
+  c.beginPath();
+  c.arc(0, 0, r, 0, Math.PI * 2);
+  c.fill();
   // 土星風のリング（黄土の惑星だけ）
   if (pi === 2) {
-    ctx.strokeStyle = "rgba(220, 200, 150, 0.7)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, r * 1.7, r * 0.5, -0.4, 0, Math.PI * 2);
-    ctx.stroke();
+    c.strokeStyle = "rgba(220, 200, 150, 0.7)";
+    c.lineWidth = 2;
+    c.beginPath();
+    c.ellipse(0, 0, r * 1.7, r * 0.5, -0.4, 0, Math.PI * 2);
+    c.stroke();
   }
-  ctx.restore();
 }
 
 // 宇宙：ななめに流れる流れ星（光の尾を引く）。Deco を流用。
@@ -4566,35 +4625,35 @@ function drawAurora(): void {
 }
 
 // 氷の世界：奥に並ぶ氷山のシルエット（青白い三角）
-function drawIceberg(d: Deco): void {
-  const s = d.scale;
+// 奥の氷山の「形」（中心(0,0)・等倍）。ぼかしスプライトの焼き込み用
+function drawIcebergShape(c: CanvasRenderingContext2D): void {
   // 本体：上が明るく下が青い縦グラデ
-  const g = ctx.createLinearGradient(d.x, d.y - 26 * s, d.x, d.y + 20 * s);
+  const g = c.createLinearGradient(0, -26, 0, 20);
   g.addColorStop(0, "rgba(240, 250, 255, 0.82)");
   g.addColorStop(1, "rgba(178, 208, 234, 0.62)");
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.moveTo(d.x - 46 * s, d.y + 20 * s);
-  ctx.lineTo(d.x, d.y - 26 * s);
-  ctx.lineTo(d.x + 46 * s, d.y + 20 * s);
-  ctx.closePath();
-  ctx.fill();
+  c.fillStyle = g;
+  c.beginPath();
+  c.moveTo(-46, 20);
+  c.lineTo(0, -26);
+  c.lineTo(46, 20);
+  c.closePath();
+  c.fill();
   // 右側の影の面（立体感を出す）
-  ctx.fillStyle = "rgba(150, 180, 212, 0.35)";
-  ctx.beginPath();
-  ctx.moveTo(d.x, d.y - 26 * s);
-  ctx.lineTo(d.x + 46 * s, d.y + 20 * s);
-  ctx.lineTo(d.x + 8 * s, d.y + 20 * s);
-  ctx.closePath();
-  ctx.fill();
+  c.fillStyle = "rgba(150, 180, 212, 0.35)";
+  c.beginPath();
+  c.moveTo(0, -26);
+  c.lineTo(46, 20);
+  c.lineTo(8, 20);
+  c.closePath();
+  c.fill();
   // 雪をかぶった明るい頂
-  ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
-  ctx.beginPath();
-  ctx.moveTo(d.x - 16 * s, d.y - 4 * s);
-  ctx.lineTo(d.x, d.y - 26 * s);
-  ctx.lineTo(d.x + 16 * s, d.y - 4 * s);
-  ctx.closePath();
-  ctx.fill();
+  c.fillStyle = "rgba(255, 255, 255, 0.85)";
+  c.beginPath();
+  c.moveTo(-16, -4);
+  c.lineTo(0, -26);
+  c.lineTo(16, -4);
+  c.closePath();
+  c.fill();
 }
 
 // 氷の世界：近い雪の丘（手前を流れる白いふくらみ・ひかえめに）
@@ -4649,26 +4708,33 @@ function drawLightRays(): void {
   ctx.restore();
 }
 
-// 海の中：奥に沈む岩のシルエット（青グレーで控えめに）
-function drawSeaRock(d: Deco): void {
-  const s = d.scale;
-  const rx = 50 * s;
-  const ry = 26 * s;
+// 海の中：奥に沈む岩の「形」（中心(0,0)・等倍）。ぼかしスプライトの焼き込み用
+function drawSeaRockShape(c: CanvasRenderingContext2D): void {
+  const rx = 50;
+  const ry = 26;
   // 上が少し明るい縦グラデで、平たい影→丸い岩に
-  const g = ctx.createLinearGradient(d.x, d.y - ry, d.x, d.y + ry);
+  const g = c.createLinearGradient(0, -ry, 0, ry);
   g.addColorStop(0, "rgba(22, 70, 100, 0.6)");
   g.addColorStop(1, "rgba(4, 26, 44, 0.55)");
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.ellipse(d.x, d.y, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fill();
+  c.fillStyle = g;
+  c.beginPath();
+  c.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+  c.fill();
   // 上面のリムライト（水面からの光が当たる感じ）
-  ctx.strokeStyle = "rgba(150, 220, 255, 0.14)";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.ellipse(d.x, d.y, rx * 0.95, ry * 0.95, 0, Math.PI * 1.15, Math.PI * 1.85);
-  ctx.stroke();
+  c.strokeStyle = "rgba(150, 220, 255, 0.14)";
+  c.lineWidth = 1.5;
+  c.beginPath();
+  c.ellipse(0, 0, rx * 0.95, ry * 0.95, 0, Math.PI * 1.15, Math.PI * 1.85);
+  c.stroke();
 }
+
+// ぼかし済みスプライトを最初に1回だけ焼き込む（毎フレームのblurを無くすため）
+const hillSprite = bakeBlurredSprite(60, 2, drawHillShape); // 夜空：遠い山
+const seaRockSprite = bakeBlurredSprite(54, 2, drawSeaRockShape); // 海：奥の岩
+const icebergSprite = bakeBlurredSprite(50, 2, drawIcebergShape); // 氷：奥の氷山
+const planetSprites = [0, 1, 2].map((v) =>
+  bakeBlurredSprite(26, 1, (c) => drawPlanetShape(c, v)),
+); // 宇宙：奥の惑星（3種類の色）
 
 // 海の中：立ちのぼる泡（1粒）
 function drawBubble(d: Deco): void {
@@ -4749,6 +4815,9 @@ function drawTouchControls(): void {
 // render: 今の状態を画面に描く
 // -------------------------------------------------------------------
 function render(): void {
+  // Retina対応：内部解像度に合わせて全体を拡大する（座標は480x640のまま）
+  ctx.setTransform(canvas.width / WIDTH, 0, 0, canvas.height / HEIGHT, 0, 0);
+
   // 「あそびかた」リンクはプレイ中だけ隠す（タイトル・決着では表示）
   if (helpLink) {
     helpLink.style.display =
