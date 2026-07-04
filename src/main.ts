@@ -57,6 +57,10 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "KeyM" && !keys.has(e.code)) {
     toggleMute();
   }
+  // ポーズ中に T でタイトルへ戻る（今のプレイはやり直しになるので、ボムのXとは離れたキーに）
+  if (e.code === "KeyT" && !keys.has(e.code) && gameState === "paused") {
+    backToTitle();
+  }
   keys.add(e.code);
   // 矢印キーやスペースで画面がスクロールしないように
   if (
@@ -163,10 +167,13 @@ canvas.addEventListener(
     showTouchControls = true;
     for (const t of Array.from(e.changedTouches)) {
       const g = toGame(t.clientX, t.clientY);
-      // ポーズ中：「音あり/音なし」ボタンなら切り替え、それ以外はどこを触っても再開
+      // ポーズ中：「音あり/音なし」なら切り替え、「タイトルへ」ならタイトルに戻る。
+      // それ以外はどこを触っても再開
       if (gameState === "paused") {
         if (inRect(g.x, g.y, MUTE_BTN_X, MUTE_BTN_Y, MUTE_BTN_W, MUTE_BTN_H)) {
           toggleMute();
+        } else if (inRect(g.x, g.y, MUTE_BTN_X, PAUSE_TITLE_BTN_Y, MUTE_BTN_W, MUTE_BTN_H)) {
+          backToTitle();
         } else {
           resumeGame();
         }
@@ -536,6 +543,8 @@ const MUTE_BTN_W = 190;
 const MUTE_BTN_H = 40;
 const MUTE_BTN_X = WIDTH / 2 - MUTE_BTN_W / 2;
 const MUTE_BTN_Y = HEIGHT / 2 + 66;
+// ポーズ画面の「タイトルへ」ボタン（音ボタンのすぐ下）
+const PAUSE_TITLE_BTN_Y = MUTE_BTN_Y + MUTE_BTN_H + 14;
 
 // ゲームオーバー画面のボタン（コンティニュー／タイトルへ）の位置と大きさ
 const GO_BTN_W = 260;
@@ -5475,6 +5484,16 @@ function render(): void {
       isMuted() ? "#9aa3b2" : "#7dff9d",
       isMuted() ? "🔇 音なし" : "🔊 音あり",
       showTouchControls ? "タップで切り替え" : "M で切り替え",
+    );
+    // タイトルへ戻るボタン（今のプレイはやり直しになる）
+    drawUiButton(
+      MUTE_BTN_X,
+      PAUSE_TITLE_BTN_Y,
+      MUTE_BTN_W,
+      MUTE_BTN_H,
+      "#9aa3b2",
+      showTouchControls ? "タイトルへ" : "タイトルへ（T）",
+      "今のプレイは最初から",
     );
     ctx.restore();
     ctx.textAlign = "left";
