@@ -417,6 +417,10 @@ const BOSS_DEFEAT_FLASH_TIME = 0.5; // 撃破フラッシュの表示時間（�
 let bossDefeatFlash = 0; // 0より大きい間、画面が白くフラッシュする
 let bossDefeatColor = "#ffffff"; // フラッシュのふち色（倒したボスの色）
 
+// 被弾の演出（画面のフチが赤く光る）
+const HURT_FLASH_TIME = 0.45; // 被弾フラッシュの表示時間（秒）
+let hurtFlash = 0; // 0より大きい間、画面のフチが赤くにじむ
+
 // ゲーム全体の状態。
 type GameState = "title" | "playing" | "paused" | "gameover" | "clear";
 let gameState: GameState = "title"; // 起動時はタイトル画面から
@@ -1128,9 +1132,10 @@ function damagePlayer(): void {
   player.power = Math.max(1, player.power - 1); // 被弾で1段階ダウン
   spawnExplosion(player.x, player.y, "#5cff9d", 24);
   playHit();
-  // 被弾の手応え：画面を揺らし、一瞬だけ動きを止める
+  // 被弾の手応え：画面を揺らし、一瞬だけ動きを止め、フチを赤く光らせる
   shakeTime = SHAKE_TIME;
   hitStop = HITSTOP_TIME;
+  hurtFlash = HURT_FLASH_TIME;
   if (player.lives <= 0) {
     gameState = "gameover";
     resultLock = 0.8; // 誤リスタート防止
@@ -1300,6 +1305,7 @@ function resetGame(): void {
   player.bombs = START_BOMBS;
   bombFlash = 0;
   bossDefeatFlash = 0;
+  hurtFlash = 0;
   bombKeyWasDown = false;
   shakeTime = 0;
   hitStop = 0;
@@ -1379,6 +1385,7 @@ function update(dt: number): void {
   // ボムの閃光・画面の揺れを時間で弱めていく（どの状態でも進める）
   if (bombFlash > 0) bombFlash -= dt;
   if (bossDefeatFlash > 0) bossDefeatFlash -= dt;
+  if (hurtFlash > 0) hurtFlash -= dt;
   if (shakeTime > 0) shakeTime -= dt;
 
   // --- 爆発の破片（どの状態でも動かし続ける）---
@@ -5049,6 +5056,21 @@ function render(): void {
 
   // ここでゲーム世界の揺れを終了（以降のHUDや決着表示は揺らさない）
   ctx.restore();
+
+  // 被弾フラッシュ：画面のフチが赤くにじんでスッと消える（中央は透明のまま）
+  if (hurtFlash > 0) {
+    const t = hurtFlash / HURT_FLASH_TIME; // 1 → 0
+    ctx.save();
+    const g = ctx.createRadialGradient(
+      WIDTH / 2, HEIGHT / 2, WIDTH * 0.34,
+      WIDTH / 2, HEIGHT / 2, WIDTH * 0.78
+    );
+    g.addColorStop(0, "rgba(255, 40, 40, 0)");
+    g.addColorStop(1, `rgba(255, 30, 30, ${t * 0.55})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.restore();
+  }
 
   // プレイ中の情報表示（スコア・残機・パワー・ボム）を角丸パネルにまとめる
   // ※ふた回り小さくして、ボス戦などで邪魔にならないように
