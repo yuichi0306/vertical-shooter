@@ -5,7 +5,7 @@
 // ===================================================================
 
 import { STAGES, type EnemyKind, type BossKind, type StageTheme } from "./stage";
-import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion, playBomb, playHeal, setMusic } from "./audio";
+import { initAudio, playShot, playExplosion, playHit, playBossHit, playBossExplosion, playBomb, playHeal, setMusic, setMuted, isMuted } from "./audio";
 
 // ゲーム内部の解像度（座標はすべてこのサイズを基準に書く）
 const WIDTH = 480;
@@ -33,6 +33,10 @@ window.addEventListener("keydown", (e) => {
   if ((e.code === "KeyP" || e.code === "Escape") && !keys.has(e.code)) {
     if (gameState === "playing") pauseGame();
     else if (gameState === "paused") resumeGame();
+  }
+  // 音あり／音なしの切り替え（M）。どの画面でも使える。押した瞬間だけ反応する
+  if (e.code === "KeyM" && !keys.has(e.code)) {
+    toggleMute();
   }
   keys.add(e.code);
   // 矢印キーやスペースで画面がスクロールしないように
@@ -140,13 +144,27 @@ canvas.addEventListener(
     showTouchControls = true;
     for (const t of Array.from(e.changedTouches)) {
       const g = toGame(t.clientX, t.clientY);
-      // ポーズ中：どこを触っても再開
+      // ポーズ中：「音あり/音なし」ボタンなら切り替え、それ以外はどこを触っても再開
       if (gameState === "paused") {
-        resumeGame();
+        if (inRect(g.x, g.y, MUTE_BTN_X, MUTE_BTN_Y, MUTE_BTN_W, MUTE_BTN_H)) {
+          toggleMute();
+        } else {
+          resumeGame();
+        }
         touchRoles.set(t.identifier, "ui");
         continue;
       }
-      // タイトル/決着画面では、どこを触ってもタップ＝決定
+      // ゲームオーバー画面：2つのボタン（コンティニュー／タイトルへ）のタップだけ受け付ける
+      if (gameState === "gameover") {
+        if (inRect(g.x, g.y, GO_BTN_X, GO_CONT_Y, GO_BTN_W, GO_BTN_H)) {
+          goTap = "continue";
+        } else if (inRect(g.x, g.y, GO_BTN_X, GO_TITLE_Y, GO_BTN_W, GO_BTN_H)) {
+          goTap = "title";
+        }
+        touchRoles.set(t.identifier, "ui");
+        continue;
+      }
+      // タイトル/クリア画面では、どこを触ってもタップ＝決定
       if (gameState !== "playing") {
         uiTap = true;
         touchRoles.set(t.identifier, "ui");
@@ -207,6 +225,25 @@ function endTouch(e: TouchEvent): void {
 }
 canvas.addEventListener("touchend", endTouch, { passive: false });
 canvas.addEventListener("touchcancel", endTouch, { passive: false });
+
+// -------------------------------------------------------------------
+// タブや別ウィンドウへ切り替えたときの安全処理。
+//   切り替え中は「キーを離した」信号が届かないため、押しっぱなし扱いの
+//   キーが残って、戻ったとき勝手に動き続ける事故が起きる。
+//   → ①押されている扱いのキー・指を全部リセット ②プレイ中なら自動ポーズ
+// -------------------------------------------------------------------
+function onScreenHidden(): void {
+  keys.clear(); // 押しっぱなし扱いのキーを全部リセット
+  touchDirX = 0;
+  touchDirY = 0;
+  touchFire = false;
+  touchRoles.clear();
+  if (gameState === "playing") pauseGame(); // 戻ってきたらポーズ画面から再開
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) onScreenHidden();
+});
+window.addEventListener("blur", onScreenHidden);
 
 // -------------------------------------------------------------------
 // 背景の星：下に流れることで「スクロールしている」感じを出す
@@ -462,6 +499,38 @@ function saveHighScoreIfNeeded(): void {
 
 let highScore = loadHighScore();
 let newRecord = false; // 今回のプレイでハイスコアを更新したか
+
+// -------------------------------------------------------------------
+// 音あり／音なしの設定（ブラウザに保存して次回も残す）
+// -------------------------------------------------------------------
+const MUTED_KEY = "vshooter.muted";
+setMuted(localStorage.getItem(MUTED_KEY) === "1"); // 前回の設定を復元
+
+// 音あり⇔音なしを切り替えて保存する（Mキー／ポーズ画面のボタンから呼ぶ）
+function toggleMute(): void {
+  setMuted(!isMuted());
+  localStorage.setItem(MUTED_KEY, isMuted() ? "1" : "0");
+}
+
+// ポーズ画面の「音あり／音なし」ボタンの位置と大きさ
+const MUTE_BTN_W = 190;
+const MUTE_BTN_H = 40;
+const MUTE_BTN_X = WIDTH / 2 - MUTE_BTN_W / 2;
+const MUTE_BTN_Y = HEIGHT / 2 + 66;
+
+// ゲームオーバー画面のボタン（コンティニュー／タイトルへ）の位置と大きさ
+const GO_BTN_W = 260;
+const GO_BTN_H = 46;
+const GO_BTN_X = WIDTH / 2 - GO_BTN_W / 2;
+const GO_CONT_Y = HEIGHT / 2 + 72; // コンティニューボタンの上端
+const GO_TITLE_Y = HEIGHT / 2 + 132; // タイトルへボタンの上端
+// ゲームオーバー画面でどちらのボタンをタップしたか（タッチ操作用。1フレームで消費）
+let goTap: "continue" | "title" | null = null;
+
+// 点 (px,py) が長方形 (x,y,w,h) の中にあるか（画面ボタンの当たり判定）
+function inRect(px: number, py: number, x: number, y: number, w: number, h: number): boolean {
+  return px >= x && px <= x + w && py >= y && py <= y + h;
+}
 
 // -------------------------------------------------------------------
 // 自機のショット（弾）
@@ -1291,8 +1360,9 @@ function advanceStage(): void {
   setMusic(stage.normalMusic); // そのステージの道中BGMに切り替え
 }
 
-// ゲームを最初の状態に戻す（開始時とリスタート時に呼ぶ）
-function resetGame(): void {
+// ゲームを最初の状態に戻す（開始時とリスタート時に呼ぶ）。
+//   startStage を指定すると、そのステージから始める（コンティニュー用。スコアは0に戻る）
+function resetGame(startStage = 0): void {
   player.x = WIDTH / 2;
   player.y = HEIGHT - 90;
   player.fireCooldown = 0;
@@ -1320,10 +1390,10 @@ function resetGame(): void {
   boss = null;
   bossSpawned = false;
   midBossSpawned = false;
-  stageIndex = 0; // 最初のステージから
-  stage = STAGES[0];
+  stageIndex = startStage; // ふつうは最初から。コンティニュー時は倒れたステージから
+  stage = STAGES[stageIndex];
   theme = stage.theme;
-  stageBanner = STAGE_BANNER_TIME; // 「STAGE 1」を表示
+  stageBanner = STAGE_BANNER_TIME; // 「STAGE 1」などを表示
   stageTime = 0;
   nextEventIndex = 0;
   scheduleBananas(); // ステージ1のバナナ出現タイミングを決める
@@ -1338,6 +1408,13 @@ function resetGame(): void {
   touchRoles.clear();
   gameState = "playing";
   setMusic(stage.normalMusic); // 道中はそのステージの通常BGM
+}
+
+// タイトル画面へ戻る（全クリア後・ゲームオーバー後に呼ぶ）
+function backToTitle(): void {
+  gameState = "title";
+  titleLock = 0.4; // 押しっぱなしで即スタートしないように
+  theme = "night"; // タイトルは夜空の背景に戻す
 }
 
 // 倒した数（スコアの土台。正式なスコア表示はステップ8で整える）
@@ -1446,13 +1523,25 @@ function update(dt: number): void {
     return;
   }
 
-  // 決着後（ゲームオーバー / クリア）は、キー or タップでタイトルへ戻る
-  if (gameState === "gameover" || gameState === "clear") {
+  // 全クリア後は、キー or タップでタイトルへ戻る
+  if (gameState === "clear") {
     if (resultLock > 0) resultLock -= dt;
     else if (isDown("KeyZ", "Space", "Enter") || tapped) {
-      gameState = "title";
-      titleLock = 0.4; // 押しっぱなしで即スタートしないように
-      theme = "night"; // タイトルは夜空の背景に戻す
+      backToTitle();
+    }
+    return;
+  }
+
+  // ゲームオーバー：コンティニュー（倒れたステージの最初から・スコアは0）か、
+  // タイトルへ戻るかを選ぶ。タッチはボタンのタップ、キーは Z=続ける / X=タイトル
+  if (gameState === "gameover") {
+    const choice = goTap; // このフレームのタップを1回だけ取り出す
+    goTap = null;
+    if (resultLock > 0) resultLock -= dt;
+    else if (isDown("KeyZ", "Space", "Enter") || choice === "continue") {
+      resetGame(stageIndex); // 今のステージの最初からやり直し
+    } else if (isDown("KeyX") || choice === "title") {
+      backToTitle();
     }
     return;
   }
@@ -4735,7 +4824,7 @@ function render(): void {
       ctx.fillText("ショット・ボム: 右下のボタン", WIDTH / 2, HEIGHT - 34);
     } else {
       ctx.fillText("移動: 矢印/WASD   ショット: Z/Space", WIDTH / 2, HEIGHT - 52);
-      ctx.fillText("ボム: X / Shift   一時停止: P / Esc", WIDTH / 2, HEIGHT - 34);
+      ctx.fillText("ボム: X / Shift   一時停止: P / Esc   音: M", WIDTH / 2, HEIGHT - 34);
     }
     ctx.textAlign = "left";
     return; // タイトル中はここで描画終了
@@ -5308,6 +5397,16 @@ function render(): void {
     ctx.fillStyle = "#cfd6e2";
     ctx.font = "14px monospace";
     ctx.fillText(showTouchControls ? "タップで再開" : "P / Esc で再開", cx, cy + 34);
+    // 音あり／音なしの切り替えボタン（設定はブラウザに保存される）
+    drawUiButton(
+      MUTE_BTN_X,
+      MUTE_BTN_Y,
+      MUTE_BTN_W,
+      MUTE_BTN_H,
+      isMuted() ? "#9aa3b2" : "#7dff9d",
+      isMuted() ? "🔇 音なし" : "🔊 音あり",
+      showTouchControls ? "タップで切り替え" : "M で切り替え",
+    );
     ctx.restore();
     ctx.textAlign = "left";
   }
@@ -5365,16 +5464,62 @@ function render(): void {
       ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = "#9aa3b2";
-    ctx.font = "14px monospace";
-    ctx.fillText(
-      showTouchControls ? "タップでタイトルへ" : "Z / Space でタイトルへ",
-      cx,
-      cy + 92,
+    // コンティニュー（倒れたステージの最初から・スコアは0に戻る）
+    drawUiButton(
+      GO_BTN_X,
+      GO_CONT_Y,
+      GO_BTN_W,
+      GO_BTN_H,
+      "#7dff9d",
+      showTouchControls ? "▶ コンティニュー" : "▶ コンティニュー（Z）",
+      `ステージ${stageIndex + 1}の最初から（スコアは0に）`,
+    );
+    // タイトルへ戻る
+    drawUiButton(
+      GO_BTN_X,
+      GO_TITLE_Y,
+      GO_BTN_W,
+      GO_BTN_H,
+      "#9aa3b2",
+      showTouchControls ? "タイトルへ" : "タイトルへ（X）",
     );
     ctx.restore();
     ctx.textAlign = "left";
   }
+}
+
+// 画面ボタンを1つ描く（角丸の枠＋メインの文字＋小さな説明）。
+// ポーズ画面の「音あり/音なし」やゲームオーバー画面のボタンで使う。
+function drawUiButton(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: string,
+  label: string,
+  sub?: string,
+): void {
+  ctx.save();
+  ctx.textAlign = "center";
+  // 土台（半透明の角丸パネル＋色つきのフチ）
+  ctx.fillStyle = "rgba(16, 20, 36, 0.88)";
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 10);
+  ctx.fill();
+  ctx.stroke();
+  // メインの文字（説明があるときは少し上に寄せる）
+  ctx.fillStyle = color;
+  ctx.font = "bold 16px monospace";
+  ctx.fillText(label, x + w / 2, y + (sub ? h / 2 - 3 : h / 2 + 6));
+  // 小さな説明
+  if (sub) {
+    ctx.fillStyle = "#9aa3b2";
+    ctx.font = "10px monospace";
+    ctx.fillText(sub, x + w / 2, y + h - 8);
+  }
+  ctx.restore();
 }
 
 // 全クリアの特別エンディング：これまで倒した5体のゴリラが勢ぞろいするお祝い画面。

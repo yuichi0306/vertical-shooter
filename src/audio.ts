@@ -6,16 +6,35 @@
 // ===================================================================
 
 let ctx: AudioContext | null = null;
+let masterGain: GainNode | null = null; // 全部の音（効果音＋BGM）の親つまみ。ミュートに使う
+let muted = false; // 音なし設定か（main.ts から setMuted で切り替える）
 
 // 最初のユーザー操作で呼ぶ。音の再生エンジンを起動／再開する。
 export function initAudio(): void {
   if (!ctx) {
     ctx = new AudioContext();
+    // すべての音はこの masterGain を通ってスピーカーへ届く（0にすると無音）
+    masterGain = ctx.createGain();
+    masterGain.gain.value = muted ? 0 : 1;
+    masterGain.connect(ctx.destination);
   }
   // タブ復帰などで止まっていたら再開
   if (ctx.state === "suspended") {
     void ctx.resume();
   }
+}
+
+// 音あり／音なしを切り替える（true=音なし）。設定の保存は呼び出し側で行う。
+export function setMuted(m: boolean): void {
+  muted = m;
+  if (ctx && masterGain) {
+    masterGain.gain.setValueAtTime(m ? 0 : 1, ctx.currentTime);
+  }
+}
+
+// 今「音なし」設定かどうか
+export function isMuted(): boolean {
+  return muted;
 }
 
 // 単純な「音色（オシレーター）」を鳴らす。
@@ -27,7 +46,7 @@ function tone(
   vol: number,
   freqEnd?: number,
 ): void {
-  if (!ctx) return;
+  if (!ctx || !masterGain) return;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   const now = ctx.currentTime;
@@ -42,14 +61,14 @@ function tone(
   gain.gain.setValueAtTime(vol, now);
   gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
 
-  osc.connect(gain).connect(ctx.destination);
+  osc.connect(gain).connect(masterGain);
   osc.start(now);
   osc.stop(now + dur);
 }
 
 // 「ザー」というノイズを鳴らす（爆発・被弾向け）
 function noise(dur: number, vol: number): void {
-  if (!ctx) return;
+  if (!ctx || !masterGain) return;
   const now = ctx.currentTime;
   const length = Math.floor(ctx.sampleRate * dur);
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
@@ -70,7 +89,7 @@ function noise(dur: number, vol: number): void {
   gain.gain.setValueAtTime(vol, now);
   gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
 
-  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.connect(filter).connect(gain).connect(masterGain);
   src.start(now);
   src.stop(now + dur);
 }
@@ -236,12 +255,12 @@ let musicStep = 0; // 何ステップ目か
 let nextStepTime = 0; // 次のステップを鳴らす予定の時刻
 let schedulerId: number | null = null; // 予約処理のタイマー
 
-// BGM専用の音量つまみを用意する（効果音とは別系統）
+// BGM専用の音量つまみを用意する（効果音とは別系統。masterGain 経由でミュートも効く）
 function ensureMusicGain(): void {
-  if (!ctx || musicGain) return;
+  if (!ctx || !masterGain || musicGain) return;
   musicGain = ctx.createGain();
   musicGain.gain.value = 0.0001;
-  musicGain.connect(ctx.destination);
+  musicGain.connect(masterGain);
 }
 
 // BGMの音を1つ、指定の時刻に鳴らす（musicGain 経由で音量管理）
